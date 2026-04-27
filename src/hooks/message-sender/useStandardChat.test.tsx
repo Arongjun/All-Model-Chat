@@ -13,6 +13,7 @@ const {
   mockCreateStandardClientFunctions,
   mockSendMessageStream,
   mockSendMessageNonStream,
+  mockPerformOptimisticSessionUpdate,
 } = vi.hoisted(() => ({
   mockBuildContentParts: vi.fn(),
   mockCreateChatHistoryForApi: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockCreateStandardClientFunctions: vi.fn(),
   mockSendMessageStream: vi.fn(),
   mockSendMessageNonStream: vi.fn(),
+  mockPerformOptimisticSessionUpdate: vi.fn((prev) => prev),
 }));
 
 vi.mock('../../services/logService', () => ({
@@ -48,7 +50,7 @@ vi.mock('../../utils/chat/ids', () => ({
 }));
 
 vi.mock('../../utils/chat/session', () => ({
-  performOptimisticSessionUpdate: vi.fn((prev) => prev),
+  performOptimisticSessionUpdate: mockPerformOptimisticSessionUpdate,
   generateSessionTitle: vi.fn(() => 'New Chat'),
   createMessage: vi.fn((role: string, content: string, options?: Record<string, unknown>) => ({
     id: options?.id ?? `${role}-message`,
@@ -62,6 +64,8 @@ vi.mock('../../utils/chat/session', () => ({
 vi.mock('../../utils/modelHelpers', () => ({
   isGemini3Model: vi.fn((id: string) => id.includes('gemini-3')),
   isImageModel: vi.fn((id: string) => id.includes('image')),
+  isAnthropicCompatibleChatModel: vi.fn((id: string) => id.startsWith('claude-')),
+  isOpenAiCompatibleChatModel: vi.fn((id: string) => id.startsWith('gpt-') || id.startsWith('deepseek-')),
   shouldStripThinkingFromContext: vi.fn(() => false),
 }));
 
@@ -135,6 +139,7 @@ describe('useStandardChat', () => {
     vi.clearAllMocks();
 
     mockGetKeyForRequest.mockReturnValue({ key: 'api-key', isNewKey: false });
+    mockPerformOptimisticSessionUpdate.mockImplementation((prev) => prev);
     mockBuildContentParts.mockResolvedValue({
       contentParts: [{ text: 'analyze the csv' }],
       enrichedFiles: [],
@@ -532,6 +537,99 @@ describe('useStandardChat', () => {
       { citations: [{ uri: 'https://example.com/grounding' }] },
       { visitedUrls: ['https://example.com/article'] },
     );
+
+    unmount();
+  });
+
+  it('keeps API key errors in the active session instead of creating a new one', async () => {
+    mockGetKeyForRequest.mockReturnValue({ error: 'API Key not configured.' });
+
+    const existingSessions = [
+      {
+        id: 'session-1',
+        title: 'Existing chat',
+        messages: [],
+        settings: { modelId: 'gemini-2.5-flash' },
+        timestamp: Date.now(),
+        groupId: null,
+      },
+    ];
+    const updateAndPersistSessions = vi.fn((updater) => updater(existingSessions));
+    const setActiveSessionId = vi.fn();
+    const getStreamHandlers = vi.fn(() => ({
+      streamOnError: vi.fn(),
+      streamOnComplete: vi.fn(),
+      streamOnPart: vi.fn(),
+      onThoughtChunk: vi.fn(),
+    }));
+
+    const { result, unmount } = renderHook(() =>
+      useStandardChat({
+        appSettings: {
+          hideThinkingInContext: false,
+          isRawModeEnabled: false,
+          autoCanvasVisualization: false,
+          isStreamingEnabled: true,
+        } as any,
+        currentChatSettings: {
+          modelId: 'gemini-2.5-flash',
+          systemInstruction: 'Custom system instruction',
+          temperature: 1,
+          topP: 0.95,
+          topK: 64,
+          showThoughts: true,
+          thinkingBudget: 0,
+          thinkingLevel: 'LOW',
+          isGoogleSearchEnabled: false,
+          isCodeExecutionEnabled: false,
+          isLocalPythonEnabled: false,
+          isUrlContextEnabled: false,
+          isDeepSearchEnabled: false,
+          safetySettings: [],
+          mediaResolution: 'MEDIA_RESOLUTION_UNSPECIFIED',
+          hideThinkingInContext: false,
+          lockedApiKey: null,
+        } as any,
+        messages: [],
+        setEditingMessageId: vi.fn(),
+        aspectRatio: '1:1',
+        imageSize: '1K',
+        imageOutputMode: 'IMAGE_TEXT',
+        personGeneration: 'ALLOW_ADULT',
+        userScrolledUpRef: { current: false },
+        activeSessionId: 'session-1',
+        setActiveSessionId,
+        activeJobs: { current: new Map() },
+        setSessionLoading: vi.fn(),
+        updateAndPersistSessions,
+        getStreamHandlers,
+        sessionKeyMapRef: { current: new Map() },
+        handleGenerateCanvas: vi.fn(),
+        setAppFileError: vi.fn(),
+        language: 'en',
+      }),
+    );
+
+    await act(async () => {
+      await result.current.sendStandardMessage(
+        'hello',
+        [],
+        null,
+        'gemini-2.5-flash',
+      );
+    });
+
+    expect(mockPerformOptimisticSessionUpdate).toHaveBeenCalledWith(
+      existingSessions,
+      expect.objectContaining({
+        activeSessionId: 'session-1',
+        newSessionId: 'session-1',
+        title: undefined,
+      }),
+    );
+    expect(setActiveSessionId).not.toHaveBeenCalled();
+    expect(mockBuildContentParts).not.toHaveBeenCalled();
+    expect(mockSendMessageStream).not.toHaveBeenCalled();
 
     unmount();
   });

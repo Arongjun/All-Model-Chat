@@ -5,10 +5,24 @@ import {
     ThoughtSupportingPart,
     StreamMessageSender,
     NonStreamMessageSender,
+    NonStreamMessageCompleteHandler,
 } from '../../types';
 import { logService } from "../logService";
-import { getConfiguredApiClient, getHttpOptionsForContents } from "./baseApi";
+import { getConfiguredApiClient, getEffectiveApiRequestSettings, getHttpOptionsForContents } from "./baseApi";
 import { extractGemmaThoughtChannel } from "../../utils/chat/reasoning";
+import { SERVER_MANAGED_API_KEY } from "../../utils/apiUtils";
+import {
+    buildAnthropicMessagesRequestUrl,
+    buildOpenAiChatCompletionsRequestUrl,
+    DEFAULT_ANTHROPIC_API_BASE_URL,
+    DEFAULT_OPENAI_API_BASE_URL,
+    deriveSiblingProviderProxyUrl,
+} from "../../utils/apiProxyUrl";
+import {
+    isAnthropicCompatibleChatModel,
+    isOpenAiCompatibleChatModel,
+    stripModelProviderPrefix,
+} from "../../utils/modelHelpers";
 
 type CandidateWithUrlContext = {
     groundingMetadata?: unknown;
@@ -19,6 +33,96 @@ type CandidateWithUrlContext = {
 type MetadataWithCitations = {
     citations?: Array<{ uri?: string }>;
 } & Record<string, unknown>;
+
+type OpenAiChatRole = 'system' | 'user' | 'assistant';
+
+type OpenAiTextContentPart = {
+    type: 'text';
+    text: string;
+};
+
+type OpenAiImageContentPart = {
+    type: 'image_url';
+    image_url: {
+        url: string;
+    };
+};
+
+type OpenAiContentPart = OpenAiTextContentPart | OpenAiImageContentPart;
+
+type OpenAiChatMessage = {
+    role: OpenAiChatRole;
+    content: string | OpenAiContentPart[];
+};
+
+type OpenAiCompatibleGenerationConfig = {
+    temperature?: number;
+    topP?: number;
+    systemInstruction?: string;
+    responseMimeType?: string;
+};
+
+type OpenAiUsagePayload = {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+};
+
+type OpenAiChoiceMessage = {
+    content?: unknown;
+    reasoning_content?: unknown;
+    reasoning?: unknown;
+};
+
+type OpenAiResponsePayload = {
+    choices?: Array<{
+        text?: unknown;
+        message?: OpenAiChoiceMessage;
+    }>;
+    usage?: OpenAiUsagePayload;
+    error?: {
+        message?: string;
+    };
+};
+
+type AnthropicTextContentPart = {
+    type: 'text';
+    text: string;
+};
+
+type AnthropicImageContentPart = {
+    type: 'image';
+    source: {
+        type: 'base64';
+        media_type: string;
+        data: string;
+    };
+};
+
+type AnthropicContentPart = AnthropicTextContentPart | AnthropicImageContentPart;
+
+type AnthropicMessage = {
+    role: 'user' | 'assistant';
+    content: string | AnthropicContentPart[];
+};
+
+type AnthropicUsagePayload = {
+    input_tokens?: number;
+    output_tokens?: number;
+};
+
+type AnthropicResponsePayload = {
+    content?: Array<{
+        type?: string;
+        text?: string;
+    }>;
+    usage?: AnthropicUsagePayload;
+    error?: {
+        message?: string;
+    };
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
@@ -204,6 +308,716 @@ const withAbortSignal = <T extends object>(
     abortSignal,
 });
 
+const isImageMimeType = (mimeType: string | undefined): boolean =>
+    typeof mimeType === 'string' && mimeType.toLowerCase().startsWith('image/');
+
+const appendTextPart = (contentParts: OpenAiContentPart[], text: string): void => {
+    if (!text) return;
+    contentParts.push({ type: 'text', text });
+};
+
+const partToOpenAiContentParts = (part: Part): OpenAiContentPart[] => {
+    const contentParts: OpenAiContentPart[] = [];
+
+    if (typeof part.text === 'string' && part.text.length > 0) {
+        appendTextPart(contentParts, part.text);
+    }
+
+    const inlineData = (part as Part & { inlineData?: { mimeType?: string; data?: string } }).inlineData;
+    if (inlineData?.data) {
+        if (isImageMimeType(inlineData.mimeType)) {
+            contentParts.push({
+                type: 'image_url',
+                image_url: {
+                    url: `data:${inlineData.mimeType};base64,${inlineData.data}`,
+                },
+            });
+        } else {
+            appendTextPart(
+                contentParts,
+                `[Attachment omitted: ${inlineData.mimeType || 'unknown inline data'} is not supported by OpenAI-compatible Chat Completions.]`,
+            );
+        }
+    }
+
+    const fileData = (part as Part & { fileData?: { mimeType?: string; fileUri?: string } }).fileData;
+    if (fileData?.fileUri) {
+        const fileUri = fileData.fileUri;
+        if (isImageMimeType(fileData.mimeType) && /^(https?:|data:)/i.test(fileUri)) {
+            contentParts.push({
+                type: 'image_url',
+                image_url: { url: fileUri },
+            });
+        } else {
+            appendTextPart(
+                contentParts,
+                `[Attachment omitted: ${fileData.mimeType || 'external file'} at ${fileUri} requires Gemini Files/URL context and is not directly readable by OpenAI-compatible chat APIs.]`,
+            );
+        }
+    }
+
+    if ((part as Part & { executableCode?: unknown }).executableCode) {
+        appendTextPart(contentParts, '[Previous executable code part omitted for OpenAI-compatible chat.]');
+    }
+
+    if ((part as Part & { codeExecutionResult?: { output?: string } }).codeExecutionResult) {
+        const output = (part as Part & { codeExecutionResult?: { output?: string } }).codeExecutionResult?.output;
+        appendTextPart(contentParts, output ? `[Previous code execution output]\n${output}` : '[Previous code execution result omitted.]');
+    }
+
+    return contentParts;
+};
+
+const partsToOpenAiContent = (parts: Part[]): OpenAiChatMessage['content'] => {
+    const contentParts = parts.flatMap(partToOpenAiContentParts);
+
+    if (contentParts.length === 0) {
+        return '';
+    }
+
+    if (contentParts.length === 1 && contentParts[0].type === 'text') {
+        return contentParts[0].text;
+    }
+
+    return contentParts;
+};
+
+const toOpenAiRole = (role: 'user' | 'model'): 'user' | 'assistant' =>
+    role === 'model' ? 'assistant' : 'user';
+
+const buildOpenAiMessages = (
+    history: ChatHistoryItem[],
+    role: 'user' | 'model',
+    parts: Part[],
+    config: unknown,
+): OpenAiChatMessage[] => {
+    const openAiConfig = (config || {}) as OpenAiCompatibleGenerationConfig;
+    const messages: OpenAiChatMessage[] = [];
+
+    if (openAiConfig.systemInstruction?.trim()) {
+        messages.push({
+            role: 'system',
+            content: openAiConfig.systemInstruction.trim(),
+        });
+    }
+
+    for (const item of history) {
+        messages.push({
+            role: toOpenAiRole(item.role),
+            content: partsToOpenAiContent(item.parts),
+        });
+    }
+
+    messages.push({
+        role: toOpenAiRole(role),
+        content: partsToOpenAiContent(parts),
+    });
+
+    return messages;
+};
+
+const partToAnthropicContentParts = (part: Part): AnthropicContentPart[] => {
+    const contentParts: AnthropicContentPart[] = [];
+
+    if (typeof part.text === 'string' && part.text.length > 0) {
+        contentParts.push({ type: 'text', text: part.text });
+    }
+
+    const inlineData = (part as Part & { inlineData?: { mimeType?: string; data?: string } }).inlineData;
+    if (inlineData?.data) {
+        if (isImageMimeType(inlineData.mimeType)) {
+            contentParts.push({
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: inlineData.mimeType || 'image/png',
+                    data: inlineData.data,
+                },
+            });
+        } else {
+            contentParts.push({
+                type: 'text',
+                text: `[Attachment omitted: ${inlineData.mimeType || 'unknown inline data'} is not supported by Anthropic-compatible Messages API.]`,
+            });
+        }
+    }
+
+    const fileData = (part as Part & { fileData?: { mimeType?: string; fileUri?: string } }).fileData;
+    if (fileData?.fileUri) {
+        contentParts.push({
+            type: 'text',
+            text: `[Attachment omitted: ${fileData.mimeType || 'external file'} at ${fileData.fileUri} requires Gemini Files/URL context and is not directly readable by Anthropic-compatible message APIs.]`,
+        });
+    }
+
+    if ((part as Part & { executableCode?: unknown }).executableCode) {
+        contentParts.push({ type: 'text', text: '[Previous executable code part omitted for Anthropic-compatible chat.]' });
+    }
+
+    if ((part as Part & { codeExecutionResult?: { output?: string } }).codeExecutionResult) {
+        const output = (part as Part & { codeExecutionResult?: { output?: string } }).codeExecutionResult?.output;
+        contentParts.push({
+            type: 'text',
+            text: output ? `[Previous code execution output]\n${output}` : '[Previous code execution result omitted.]',
+        });
+    }
+
+    return contentParts;
+};
+
+const partsToAnthropicContent = (parts: Part[]): AnthropicMessage['content'] => {
+    const contentParts = parts.flatMap(partToAnthropicContentParts);
+
+    if (contentParts.length === 0) {
+        return '';
+    }
+
+    if (contentParts.length === 1 && contentParts[0].type === 'text') {
+        return contentParts[0].text;
+    }
+
+    return contentParts;
+};
+
+const buildAnthropicMessages = (
+    history: ChatHistoryItem[],
+    role: 'user' | 'model',
+    parts: Part[],
+): AnthropicMessage[] => {
+    const messages: AnthropicMessage[] = [];
+
+    for (const item of history) {
+        messages.push({
+            role: item.role === 'model' ? 'assistant' : 'user',
+            content: partsToAnthropicContent(item.parts),
+        });
+    }
+
+    messages.push({
+        role: role === 'model' ? 'assistant' : 'user',
+        content: partsToAnthropicContent(parts),
+    });
+
+    return messages;
+};
+
+const resolveOpenAiChatEndpoint = async (
+    apiKey: string,
+): Promise<{ headers: Headers; url: string }> => {
+    const settings = await getEffectiveApiRequestSettings();
+    const configuredProxyUrl = settings.useCustomApiConfig && settings.useApiProxy && settings.apiProxyUrl
+        ? settings.apiProxyUrl
+        : null;
+    const siblingProxyUrl = configuredProxyUrl
+        ? deriveSiblingProviderProxyUrl(configuredProxyUrl, 'openai')
+        : null;
+    const directOpenAiBaseUrl = settings.openAiApiBase?.trim() || DEFAULT_OPENAI_API_BASE_URL;
+    const endpointUrl = buildOpenAiChatCompletionsRequestUrl(
+        siblingProxyUrl || directOpenAiBaseUrl,
+    );
+    const headers = new Headers({
+        'content-type': 'application/json',
+    });
+
+    if (apiKey !== SERVER_MANAGED_API_KEY) {
+        headers.set('authorization', `Bearer ${apiKey}`);
+    }
+
+    if (siblingProxyUrl) {
+        return { headers, url: endpointUrl };
+    }
+
+    if (apiKey === SERVER_MANAGED_API_KEY) {
+        throw new Error('OpenAI-compatible chat models require the server-managed API proxy. Configure `apiProxyUrl` to point at the workspace API.');
+    }
+
+    return { headers, url: endpointUrl };
+};
+
+const resolveAnthropicMessagesEndpoint = async (
+    apiKey: string,
+): Promise<{ headers: Headers; url: string }> => {
+    const settings = await getEffectiveApiRequestSettings();
+    const configuredProxyUrl = settings.useCustomApiConfig && settings.useApiProxy && settings.apiProxyUrl
+        ? settings.apiProxyUrl
+        : null;
+    const siblingProxyUrl = configuredProxyUrl
+        ? deriveSiblingProviderProxyUrl(configuredProxyUrl, 'anthropic')
+        : null;
+    const directAnthropicBaseUrl = settings.anthropicApiBase?.trim() || DEFAULT_ANTHROPIC_API_BASE_URL;
+    const endpointUrl = buildAnthropicMessagesRequestUrl(
+        siblingProxyUrl || directAnthropicBaseUrl,
+    );
+    const headers = new Headers({
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+    });
+
+    if (apiKey !== SERVER_MANAGED_API_KEY) {
+        headers.set('x-api-key', apiKey);
+    }
+
+    if (siblingProxyUrl) {
+        return { headers, url: endpointUrl };
+    }
+
+    if (apiKey === SERVER_MANAGED_API_KEY) {
+        throw new Error('Anthropic-compatible chat models require the server-managed API proxy. Configure `apiProxyUrl` to point at the workspace API.');
+    }
+
+    return { headers, url: endpointUrl };
+};
+
+const mapOpenAiUsageMetadata = (usage?: OpenAiUsagePayload): UsageMetadata | undefined => {
+    if (!usage) return undefined;
+
+    const promptTokenCount = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+    const candidatesTokenCount = usage.completion_tokens ?? usage.output_tokens ?? 0;
+    const totalTokenCount = usage.total_tokens || promptTokenCount + candidatesTokenCount;
+
+    return {
+        promptTokenCount,
+        candidatesTokenCount,
+        totalTokenCount,
+    } as UsageMetadata;
+};
+
+const mapAnthropicUsageMetadata = (usage?: AnthropicUsagePayload): UsageMetadata | undefined => {
+    if (!usage) return undefined;
+
+    const promptTokenCount = usage.input_tokens ?? 0;
+    const candidatesTokenCount = usage.output_tokens ?? 0;
+
+    return {
+        promptTokenCount,
+        candidatesTokenCount,
+        totalTokenCount: promptTokenCount + candidatesTokenCount,
+    } as UsageMetadata;
+};
+
+const buildOpenAiChatRequestBody = (
+    modelId: string,
+    messages: OpenAiChatMessage[],
+    config: unknown,
+    stream: boolean,
+): Record<string, unknown> => {
+    const openAiConfig = (config || {}) as OpenAiCompatibleGenerationConfig;
+    const body: Record<string, unknown> = {
+        model: stripModelProviderPrefix(modelId),
+        messages,
+        stream,
+    };
+
+    if (typeof openAiConfig.temperature === 'number') {
+        body.temperature = openAiConfig.temperature;
+    }
+
+    if (typeof openAiConfig.topP === 'number') {
+        body.top_p = openAiConfig.topP;
+    }
+
+    if (openAiConfig.responseMimeType === 'application/json') {
+        body.response_format = { type: 'json_object' };
+    }
+
+    return body;
+};
+
+const buildAnthropicMessagesRequestBody = (
+    modelId: string,
+    messages: AnthropicMessage[],
+    config: unknown,
+    stream: boolean,
+): Record<string, unknown> => {
+    const anthropicConfig = (config || {}) as OpenAiCompatibleGenerationConfig;
+    const body: Record<string, unknown> = {
+        model: stripModelProviderPrefix(modelId),
+        messages,
+        max_tokens: 4096,
+        stream,
+    };
+
+    if (anthropicConfig.systemInstruction?.trim()) {
+        body.system = anthropicConfig.systemInstruction.trim();
+    }
+
+    if (typeof anthropicConfig.temperature === 'number') {
+        body.temperature = anthropicConfig.temperature;
+    }
+
+    if (typeof anthropicConfig.topP === 'number') {
+        body.top_p = anthropicConfig.topP;
+    }
+
+    return body;
+};
+
+const getOpenAiErrorMessage = async (response: Response): Promise<string> => {
+    try {
+        const payload = await response.json() as OpenAiResponsePayload;
+        if (payload?.error?.message) {
+            return payload.error.message;
+        }
+    } catch {
+        // Fall back to plain text response handling below.
+    }
+
+    try {
+        const fallbackText = await response.text();
+        if (fallbackText.trim()) {
+            return fallbackText.trim();
+        }
+    } catch {
+        // Ignore response body parse failures and fall through to the status text.
+    }
+
+    return response.statusText || `Request failed with status ${response.status}`;
+};
+
+const getAnthropicErrorMessage = async (response: Response): Promise<string> => {
+    try {
+        const payload = await response.json() as AnthropicResponsePayload;
+        if (payload?.error?.message) {
+            return payload.error.message;
+        }
+    } catch {
+        // Fall back to plain text response handling below.
+    }
+
+    try {
+        const fallbackText = await response.text();
+        if (fallbackText.trim()) {
+            return fallbackText.trim();
+        }
+    } catch {
+        // Ignore response body parse failures and fall through to the status text.
+    }
+
+    return response.statusText || `Request failed with status ${response.status}`;
+};
+
+const extractOpenAiText = (content: unknown): string => {
+    if (typeof content === 'string') {
+        return content;
+    }
+
+    if (Array.isArray(content)) {
+        return content
+            .map((item) => {
+                if (!item || typeof item !== 'object') return '';
+                const record = item as Record<string, unknown>;
+                if (typeof record.text === 'string') return record.text;
+                if (typeof record.output_text === 'string') return record.output_text;
+                return '';
+            })
+            .join('');
+    }
+
+    return '';
+};
+
+const sendOpenAiCompatibleMessageNonStream = async (
+    apiKey: string,
+    modelId: string,
+    history: ChatHistoryItem[],
+    parts: Part[],
+    config: unknown,
+    abortSignal: AbortSignal,
+    onError: (error: Error) => void,
+    onComplete: NonStreamMessageCompleteHandler,
+): Promise<void> => {
+    try {
+        const { headers, url } = await resolveOpenAiChatEndpoint(apiKey);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(buildOpenAiChatRequestBody(
+                modelId,
+                buildOpenAiMessages(history, 'user', parts, config),
+                config,
+                false,
+            )),
+            signal: abortSignal,
+        });
+
+        if (abortSignal.aborted) {
+            onComplete([], '', undefined, undefined, undefined);
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(await getOpenAiErrorMessage(response));
+        }
+
+        const payload = await response.json() as OpenAiResponsePayload;
+        const message = payload.choices?.[0]?.message;
+        const text = extractOpenAiText(message?.content ?? payload.choices?.[0]?.text);
+        const thoughts = extractOpenAiText(message?.reasoning_content ?? message?.reasoning) || undefined;
+        const responseParts = text ? [{ text }] : [];
+
+        onComplete(responseParts, thoughts, mapOpenAiUsageMetadata(payload.usage), undefined, undefined);
+    } catch (error) {
+        logService.error(`Error in OpenAI-compatible non-stream for ${modelId}:`, error);
+        onError(error instanceof Error ? error : new Error(String(error) || 'Unknown OpenAI-compatible chat error.'));
+    }
+};
+
+const sendOpenAiCompatibleMessageStream = async (
+    apiKey: string,
+    modelId: string,
+    history: ChatHistoryItem[],
+    parts: Part[],
+    config: unknown,
+    abortSignal: AbortSignal,
+    onPart: (part: Part) => void,
+    onThoughtChunk: (chunk: string) => void,
+    onError: (error: Error) => void,
+    onComplete: (usageMetadata?: UsageMetadata, groundingMetadata?: unknown, urlContextMetadata?: unknown) => void,
+    role: 'user' | 'model',
+): Promise<void> => {
+    let finalUsageMetadata: UsageMetadata | undefined;
+
+    try {
+        const { headers, url } = await resolveOpenAiChatEndpoint(apiKey);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(buildOpenAiChatRequestBody(
+                modelId,
+                buildOpenAiMessages(history, role, parts, config),
+                config,
+                true,
+            )),
+            signal: abortSignal,
+        });
+
+        if (!response.ok) {
+            throw new Error(await getOpenAiErrorMessage(response));
+        }
+
+        if (!response.body) {
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let isDone = false;
+
+        while (!isDone) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (abortSignal.aborted) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop() ?? '';
+
+            for (const rawLine of lines) {
+                const line = rawLine.trim();
+                if (!line.startsWith('data:')) continue;
+
+                const data = line.slice('data:'.length).trim();
+                if (!data) continue;
+                if (data === '[DONE]') {
+                    isDone = true;
+                    break;
+                }
+
+                let payload: OpenAiResponsePayload & {
+                    choices?: Array<{
+                        text?: unknown;
+                        delta?: OpenAiChoiceMessage;
+                    }>;
+                };
+                try {
+                    payload = JSON.parse(data) as typeof payload;
+                } catch (error) {
+                    logService.warn('Skipping malformed OpenAI-compatible stream chunk.', { error, data });
+                    continue;
+                }
+
+                if (payload.usage) {
+                    finalUsageMetadata = mapOpenAiUsageMetadata(payload.usage);
+                }
+
+                const choice = payload.choices?.[0];
+                const text = extractOpenAiText(choice?.delta?.content ?? choice?.text);
+                const thoughts = extractOpenAiText(choice?.delta?.reasoning_content ?? choice?.delta?.reasoning);
+
+                if (thoughts) {
+                    onThoughtChunk(thoughts);
+                }
+                if (text) {
+                    onPart({ text });
+                }
+            }
+        }
+    } catch (error) {
+        logService.error(`Error in OpenAI-compatible stream for ${modelId}:`, error);
+        onError(error instanceof Error ? error : new Error(String(error) || 'Unknown OpenAI-compatible streaming error.'));
+    } finally {
+        onComplete(finalUsageMetadata, undefined, undefined);
+    }
+};
+
+const sendAnthropicCompatibleMessageNonStream = async (
+    apiKey: string,
+    modelId: string,
+    history: ChatHistoryItem[],
+    parts: Part[],
+    config: unknown,
+    abortSignal: AbortSignal,
+    onError: (error: Error) => void,
+    onComplete: NonStreamMessageCompleteHandler,
+): Promise<void> => {
+    try {
+        const { headers, url } = await resolveAnthropicMessagesEndpoint(apiKey);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(buildAnthropicMessagesRequestBody(
+                modelId,
+                buildAnthropicMessages(history, 'user', parts),
+                config,
+                false,
+            )),
+            signal: abortSignal,
+        });
+
+        if (abortSignal.aborted) {
+            onComplete([], '', undefined, undefined, undefined);
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(await getAnthropicErrorMessage(response));
+        }
+
+        const payload = await response.json() as AnthropicResponsePayload;
+        const text = (payload.content ?? [])
+            .filter((item) => item.type === 'text' && typeof item.text === 'string')
+            .map((item) => item.text)
+            .join('');
+
+        onComplete(text ? [{ text }] : [], undefined, mapAnthropicUsageMetadata(payload.usage), undefined, undefined);
+    } catch (error) {
+        logService.error(`Error in Anthropic-compatible non-stream for ${modelId}:`, error);
+        onError(error instanceof Error ? error : new Error(String(error) || 'Unknown Anthropic-compatible chat error.'));
+    }
+};
+
+const sendAnthropicCompatibleMessageStream = async (
+    apiKey: string,
+    modelId: string,
+    history: ChatHistoryItem[],
+    parts: Part[],
+    config: unknown,
+    abortSignal: AbortSignal,
+    onPart: (part: Part) => void,
+    onError: (error: Error) => void,
+    onComplete: (usageMetadata?: UsageMetadata, groundingMetadata?: unknown, urlContextMetadata?: unknown) => void,
+    role: 'user' | 'model',
+): Promise<void> => {
+    let finalUsageMetadata: UsageMetadata | undefined;
+
+    try {
+        const { headers, url } = await resolveAnthropicMessagesEndpoint(apiKey);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(buildAnthropicMessagesRequestBody(
+                modelId,
+                buildAnthropicMessages(history, role, parts),
+                config,
+                true,
+            )),
+            signal: abortSignal,
+        });
+
+        if (!response.ok) {
+            throw new Error(await getAnthropicErrorMessage(response));
+        }
+
+        if (!response.body) {
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let isDone = false;
+
+        while (!isDone) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (abortSignal.aborted) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop() ?? '';
+
+            for (const rawLine of lines) {
+                const line = rawLine.trim();
+                if (!line.startsWith('data:')) continue;
+
+                const data = line.slice('data:'.length).trim();
+                if (!data) continue;
+                if (data === '[DONE]') {
+                    isDone = true;
+                    break;
+                }
+
+                let payload: {
+                    type?: string;
+                    delta?: {
+                        type?: string;
+                        text?: string;
+                    };
+                    usage?: AnthropicUsagePayload;
+                    message?: {
+                        usage?: AnthropicUsagePayload;
+                    };
+                    error?: {
+                        message?: string;
+                    };
+                };
+                try {
+                    payload = JSON.parse(data) as typeof payload;
+                } catch (error) {
+                    logService.warn('Skipping malformed Anthropic-compatible stream chunk.', { error, data });
+                    continue;
+                }
+
+                if (payload.type === 'error') {
+                    throw new Error(payload.error?.message || 'Anthropic-compatible stream returned an error.');
+                }
+
+                if (payload.message?.usage) {
+                    finalUsageMetadata = mapAnthropicUsageMetadata(payload.message.usage);
+                }
+
+                if (payload.usage) {
+                    finalUsageMetadata = mapAnthropicUsageMetadata(payload.usage);
+                }
+
+                if (
+                    payload.type === 'content_block_delta'
+                    && payload.delta?.type === 'text_delta'
+                    && payload.delta.text
+                ) {
+                    onPart({ text: payload.delta.text });
+                }
+            }
+        }
+    } catch (error) {
+        logService.error(`Error in Anthropic-compatible stream for ${modelId}:`, error);
+        onError(error instanceof Error ? error : new Error(String(error) || 'Unknown Anthropic-compatible streaming error.'));
+    } finally {
+        onComplete(finalUsageMetadata, undefined, undefined);
+    }
+};
+
 export const generateContentTurnApi = async (
     apiKey: string,
     modelId: string,
@@ -216,6 +1030,10 @@ export const generateContentTurnApi = async (
 
     if (abortSignal.aborted) {
         throw abortError;
+    }
+
+    if (isOpenAiCompatibleChatModel(modelId) || isAnthropicCompatibleChatModel(modelId)) {
+        throw new Error('OpenAI/Anthropic-compatible chat models do not support Gemini tool-loop requests yet. Disable Gemini/server-side tools or choose a Gemini model for tool calls.');
     }
 
     const ai = await getConfiguredApiClient(apiKey, getHttpOptionsForContents(contents));
@@ -262,6 +1080,41 @@ export const sendStatelessMessageStreamApi: StreamMessageSender = async (
     onComplete,
     role = 'user'
 ) => {
+    if (isAnthropicCompatibleChatModel(modelId)) {
+        logService.info(`Sending message via Anthropic-compatible Messages stream for ${modelId} (Role: ${role})`);
+        await sendAnthropicCompatibleMessageStream(
+            apiKey,
+            modelId,
+            history,
+            parts,
+            config,
+            abortSignal,
+            onPart,
+            onError,
+            onComplete,
+            role,
+        );
+        return;
+    }
+
+    if (isOpenAiCompatibleChatModel(modelId)) {
+        logService.info(`Sending message via OpenAI-compatible Chat Completions stream for ${modelId} (Role: ${role})`);
+        await sendOpenAiCompatibleMessageStream(
+            apiKey,
+            modelId,
+            history,
+            parts,
+            config,
+            abortSignal,
+            onPart,
+            onThoughtChunk,
+            onError,
+            onComplete,
+            role,
+        );
+        return;
+    }
+
     logService.info(`Sending message via stateless generateContentStream for ${modelId} (Role: ${role})`);
     let finalUsageMetadata: UsageMetadata | undefined = undefined;
     let finalGroundingMetadata: MetadataWithCitations | null = null;
@@ -350,6 +1203,36 @@ export const sendStatelessMessageNonStreamApi: NonStreamMessageSender = async (
     onError,
     onComplete
 ) => {
+    if (isAnthropicCompatibleChatModel(modelId)) {
+        logService.info(`Sending message via Anthropic-compatible Messages for ${modelId}`);
+        await sendAnthropicCompatibleMessageNonStream(
+            apiKey,
+            modelId,
+            history,
+            parts,
+            config,
+            abortSignal,
+            onError,
+            onComplete,
+        );
+        return;
+    }
+
+    if (isOpenAiCompatibleChatModel(modelId)) {
+        logService.info(`Sending message via OpenAI-compatible Chat Completions for ${modelId}`);
+        await sendOpenAiCompatibleMessageNonStream(
+            apiKey,
+            modelId,
+            history,
+            parts,
+            config,
+            abortSignal,
+            onError,
+            onComplete,
+        );
+        return;
+    }
+
     logService.info(`Sending message via stateless generateContent (non-stream) for model ${modelId}`);
     const contents = [...history, { role: 'user', parts }];
     

@@ -5,9 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockSendStandardMessage = vi.fn();
 const mockHandleTtsImagenMessage = vi.fn();
 const mockHandleImageEditMessage = vi.fn();
-const { mockGetModelCapabilities, mockCreateNewSession } = vi.hoisted(() => ({
+const {
+  mockGetModelCapabilities,
+  mockGetKeyForRequest,
+  mockCreateNewSession,
+  mockPerformOptimisticSessionUpdate,
+} = vi.hoisted(() => ({
   mockGetModelCapabilities: vi.fn(),
+  mockGetKeyForRequest: vi.fn(),
   mockCreateNewSession: vi.fn(),
+  mockPerformOptimisticSessionUpdate: vi.fn((prev) => prev),
 }));
 
 vi.mock('./message-sender/useChatStreamHandler', () => ({
@@ -49,7 +56,7 @@ vi.mock('../utils/chat/ids', () => ({
 }));
 
 vi.mock('../utils/apiUtils', () => ({
-  getKeyForRequest: vi.fn(() => ({ key: 'api-key', isNewKey: false })),
+  getKeyForRequest: mockGetKeyForRequest,
   getApiKeyErrorTranslationKey: vi.fn((error: string) => {
     if (error === 'API Key not configured.') return 'apiRuntime_keyNotConfigured';
     if (error === 'No valid API keys found.') return 'apiRuntime_noValidKeysFound';
@@ -59,6 +66,7 @@ vi.mock('../utils/apiUtils', () => ({
 
 vi.mock('../utils/chat/session', () => ({
   createNewSession: mockCreateNewSession,
+  performOptimisticSessionUpdate: mockPerformOptimisticSessionUpdate,
 }));
 
 vi.mock('../services/logService', () => ({
@@ -73,7 +81,7 @@ vi.mock('../contexts/I18nContext', () => ({
         messageSender_imageModelSupportsImageOnly: '这个图片模型仅支持图片附件。',
         messageSender_imageModelSupportsImageAndPdfOnly: 'Nano Banana 2 仅支持图片和 PDF 附件。',
         messageSender_imageReferenceLimit: 'Gemini 3 图片模型每次请求最多支持 14 张参考图。',
-        messageSender_imagenTextOnly: 'Imagen 模型仅支持文本提示词。',
+        messageSender_imagenTextOnly: '这个图片模型仅支持文本提示词。',
         messageSender_noModelSelected: '未选择模型。',
         messageSender_errorSessionTitle: '错误',
         messageSender_apiKeyErrorSessionTitle: 'API 密钥错误',
@@ -113,10 +121,14 @@ const renderHook = <T,>(callback: () => T) => {
 describe('useMessageSender', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetKeyForRequest.mockReturnValue({ key: 'api-key', isNewKey: false });
+    mockPerformOptimisticSessionUpdate.mockImplementation((prev) => prev);
     mockCreateNewSession.mockReturnValue({ id: 'new-session' });
     mockGetModelCapabilities.mockReturnValue({
       isTtsModel: false,
       isRealImagenModel: true,
+      isStandaloneImageGenerationModel: true,
+      isAttachmentlessImageModel: true,
       isFlashImageModel: false,
       isGemini3ImageModel: false,
     });
@@ -173,7 +185,7 @@ describe('useMessageSender', () => {
       });
     });
 
-    expect(setAppFileError).toHaveBeenCalledWith('Imagen 模型仅支持文本提示词。');
+    expect(setAppFileError).toHaveBeenCalledWith('这个图片模型仅支持文本提示词。');
     expect(mockHandleTtsImagenMessage).not.toHaveBeenCalled();
     expect(mockSendStandardMessage).not.toHaveBeenCalled();
     expect(mockHandleImageEditMessage).not.toHaveBeenCalled();
@@ -184,6 +196,8 @@ describe('useMessageSender', () => {
     mockGetModelCapabilities.mockReturnValue({
       isTtsModel: false,
       isRealImagenModel: false,
+      isStandaloneImageGenerationModel: false,
+      isAttachmentlessImageModel: false,
       isFlashImageModel: false,
       isGemini3ImageModel: true,
     });
@@ -246,6 +260,8 @@ describe('useMessageSender', () => {
     mockGetModelCapabilities.mockReturnValue({
       isTtsModel: false,
       isRealImagenModel: false,
+      isStandaloneImageGenerationModel: false,
+      isAttachmentlessImageModel: false,
       isFlashImageModel: false,
       isGemini3ImageModel: true,
     });
@@ -306,6 +322,8 @@ describe('useMessageSender', () => {
     mockGetModelCapabilities.mockReturnValue({
       isTtsModel: false,
       isRealImagenModel: false,
+      isStandaloneImageGenerationModel: false,
+      isAttachmentlessImageModel: false,
       isFlashImageModel: false,
       isGemini3ImageModel: true,
     });
@@ -368,6 +386,8 @@ describe('useMessageSender', () => {
     mockGetModelCapabilities.mockReturnValue({
       isTtsModel: false,
       isRealImagenModel: false,
+      isStandaloneImageGenerationModel: false,
+      isAttachmentlessImageModel: false,
       isFlashImageModel: false,
       isGemini3ImageModel: false,
     });
@@ -417,6 +437,78 @@ describe('useMessageSender', () => {
       '错误',
     );
     expect(setActiveSessionId).toHaveBeenCalledWith('new-session');
+    unmount();
+  });
+
+  it('adds API key errors to the active session instead of creating another session', async () => {
+    const setActiveSessionId = vi.fn();
+    const existingSessions = [
+      {
+        id: 'session-1',
+        title: 'Existing chat',
+        messages: [],
+        settings: { modelId: 'gemini-3.1-flash-lite' },
+        timestamp: Date.now(),
+        groupId: null,
+      },
+    ];
+    const updateAndPersistSessions = vi.fn((updater) => updater(existingSessions));
+
+    mockGetKeyForRequest.mockReturnValue({ error: 'API Key not configured.' });
+    mockGetModelCapabilities.mockReturnValue({
+      isTtsModel: false,
+      isRealImagenModel: false,
+      isStandaloneImageGenerationModel: false,
+      isAttachmentlessImageModel: false,
+      isFlashImageModel: false,
+      isGemini3ImageModel: false,
+    });
+
+    const { result, unmount } = renderHook(() =>
+      useMessageSender({
+        appSettings: {
+          isAutoScrollOnSendEnabled: true,
+          generateQuadImages: false,
+        } as any,
+        currentChatSettings: {
+          modelId: 'gemini-3.1-flash-lite',
+        } as any,
+        messages: [],
+        selectedFiles: [],
+        setSelectedFiles: vi.fn(),
+        editingMessageId: null,
+        setEditingMessageId: vi.fn(),
+        setAppFileError: vi.fn(),
+        aspectRatio: '1:1',
+        imageSize: '1K',
+        imageOutputMode: 'IMAGE_TEXT',
+        personGeneration: 'ALLOW_ADULT',
+        userScrolledUpRef: { current: false },
+        activeSessionId: 'session-1',
+        setActiveSessionId,
+        activeJobs: { current: new Map() },
+        updateAndPersistSessions,
+        sessionKeyMapRef: { current: new Map() },
+        language: 'zh',
+        setSessionLoading: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSendMessage({ text: 'hello' });
+    });
+
+    expect(mockCreateNewSession).not.toHaveBeenCalled();
+    expect(mockPerformOptimisticSessionUpdate).toHaveBeenCalledWith(
+      existingSessions,
+      expect.objectContaining({
+        activeSessionId: 'session-1',
+        newSessionId: 'session-1',
+        title: undefined,
+      }),
+    );
+    expect(setActiveSessionId).not.toHaveBeenCalled();
+    expect(mockSendStandardMessage).not.toHaveBeenCalled();
     unmount();
   });
 });

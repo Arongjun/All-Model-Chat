@@ -11,6 +11,14 @@ interface InterfaceTogglesProps {
   onUpdate: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 }
 
+const getNotificationBlockedMessage = (t: (key: string) => string): string => {
+  const protocolWarning = window.isSecureContext
+    ? ''
+    : `\n\n${t('settings_notificationPermission_httpsHint')}`;
+
+  return `${t('settings_notificationPermission_blocked')}\n\n${t('settings_notificationPermission_steps')}${protocolWarning}`;
+};
+
 export const InterfaceToggles: React.FC<InterfaceTogglesProps> = ({
   settings,
   onUpdate,
@@ -19,18 +27,21 @@ export const InterfaceToggles: React.FC<InterfaceTogglesProps> = ({
   const handleNotificationToggle = async (enabled: boolean) => {
     if (enabled) {
       if (!('Notification' in window)) {
-        alert('Desktop notifications are not supported by your browser.');
+        alert(t('settings_notificationPermission_notSupported'));
         return;
       }
       
       if (Notification.permission === 'denied') {
-        alert('Notifications are blocked by your browser. Please enable them in your browser settings to use this feature.');
+        alert(getNotificationBlockedMessage(t));
         return;
       }
 
       if (Notification.permission === 'default') {
         const permission = await Notification.requestPermission();
         if (permission !== 'granted') {
+          if (permission === 'denied') {
+            alert(getNotificationBlockedMessage(t));
+          }
           return;
         }
       }

@@ -4,7 +4,7 @@ import { AppSettings, ChatMessage, UploadedFile, ChatSettings as IndividualChatS
 import { logService } from '../services/logService';
 import { getKeyForRequest } from '../utils/apiUtils';
 import { generateUniqueId } from '../utils/chat/ids';
-import { createNewSession } from '../utils/chat/session';
+import { createNewSession, performOptimisticSessionUpdate } from '../utils/chat/session';
 import { DEFAULT_CHAT_SETTINGS } from '../constants/appConstants';
 import { useChatStreamHandler } from './message-sender/useChatStreamHandler';
 import { useTtsImagenSender } from './message-sender/useTtsImagenSender';
@@ -117,14 +117,14 @@ export const useMessageSender = (props: MessageSenderProps) => {
         const activeModelId = sessionToUpdate.modelId;
         const capabilities = getModelCapabilities(activeModelId);
         const isTtsModel = capabilities.isTtsModel;
-        const isImagenModel = capabilities.isRealImagenModel;
+        const isStandaloneImageGenerationModel = capabilities.isStandaloneImageGenerationModel;
         const isImageEditModel = capabilities.isFlashImageModel;
         const isGemini3Image = capabilities.isGemini3ImageModel;
 
         logService.info(`Sending message with model ${activeModelId}`, { textLength: textToUse.length, fileCount: filesToUse.length, editingId: effectiveEditingId, sessionId: activeSessionId, isContinueMode, isFastMode });
 
-        if (!textToUse.trim() && !isTtsModel && !isImagenModel && !isContinueMode && filesToUse.filter(f => f.uploadState === 'active').length === 0) return;
-        if ((isTtsModel || isImagenModel || isImageEditModel || isGemini3Image) && !textToUse.trim()) return;
+        if (!textToUse.trim() && !isTtsModel && !isStandaloneImageGenerationModel && !isContinueMode && filesToUse.filter(f => f.uploadState === 'active').length === 0) return;
+        if ((isTtsModel || isStandaloneImageGenerationModel || isImageEditModel || isGemini3Image) && !textToUse.trim()) return;
         if (filesToUse.some(f => f.isProcessing || (f.uploadState !== 'active' && !f.error) )) { 
             logService.warn("Send message blocked: files are still processing.");
             setAppFileError(t('messageSender_waitForFiles')); 
@@ -163,8 +163,10 @@ export const useMessageSender = (props: MessageSenderProps) => {
             return;
         }
 
-        if (isImagenModel && filesToUse.length > 0) {
-            logService.warn("Send message blocked: Imagen models do not support file attachments.");
+        if (isStandaloneImageGenerationModel && filesToUse.length > 0) {
+            logService.warn("Send message blocked: standalone image generation models do not support file attachments.", {
+                activeModelId,
+            });
             setAppFileError(t('messageSender_imagenTextOnly'));
             return;
         }
@@ -183,11 +185,22 @@ export const useMessageSender = (props: MessageSenderProps) => {
         const keyResult = getKeyForRequest(appSettings, sessionToUpdate);
         if ('error' in keyResult) {
             logService.error("Send message failed: API Key not configured.");
-             const translatedApiError = translateApiKeyError(keyResult.error);
-             const errorMsg: ChatMessage = { id: generateUniqueId(), role: 'error', content: translatedApiError, timestamp: new Date() };
-             const newSession = createNewSession({ ...DEFAULT_CHAT_SETTINGS, ...appSettings }, [errorMsg], t('messageSender_apiKeyErrorSessionTitle'));
-             updateAndPersistSessions(p => [newSession, ...p]);
-             setActiveSessionId(newSession.id);
+            const translatedApiError = translateApiKeyError(keyResult.error);
+            const errorMsg: ChatMessage = { id: generateUniqueId(), role: 'error', content: translatedApiError, timestamp: new Date() };
+            const targetSessionId = activeSessionId || generateUniqueId();
+
+            updateAndPersistSessions((prev) =>
+                performOptimisticSessionUpdate(prev, {
+                    activeSessionId,
+                    newSessionId: targetSessionId,
+                    newMessages: [errorMsg],
+                    settings: { ...DEFAULT_CHAT_SETTINGS, ...appSettings, ...sessionToUpdate },
+                    title: activeSessionId ? undefined : t('messageSender_apiKeyErrorSessionTitle'),
+                })
+            );
+            if (!activeSessionId) {
+                setActiveSessionId(targetSessionId);
+            }
             return;
         }
         const { key: keyToUse, isNewKey } = keyResult;
@@ -201,7 +214,7 @@ export const useMessageSender = (props: MessageSenderProps) => {
         }
         if (overrideOptions?.files === undefined) setSelectedFiles([]);
 
-        if (isTtsModel || isImagenModel) {
+        if (isTtsModel || isStandaloneImageGenerationModel) {
             await handleTtsImagenMessage(keyToUse, activeSessionId, generationId, newAbortController, appSettings, sessionToUpdate, textToUse.trim(), aspectRatio, imageSize, personGeneration, { shouldLockKey });
             if (editingMessageId) setEditingMessageId(null);
             return;

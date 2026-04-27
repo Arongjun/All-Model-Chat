@@ -21,8 +21,16 @@ interface ApiConfigSectionProps {
   setUseCustomApiConfig: (value: boolean) => void;
   apiKey: string | null;
   setApiKey: (value: string | null) => void;
+  openAiApiKey: string | null;
+  setOpenAiApiKey: (value: string | null) => void;
+  anthropicApiKey: string | null;
+  setAnthropicApiKey: (value: string | null) => void;
   apiProxyUrl: string | null;
   setApiProxyUrl: (value: string | null) => void;
+  openAiApiBase: string | null;
+  setOpenAiApiBase: (value: string | null) => void;
+  anthropicApiBase: string | null;
+  setAnthropicApiBase: (value: string | null) => void;
   useApiProxy: boolean;
   setUseApiProxy: (value: boolean) => void;
   serverManagedApi: boolean;
@@ -36,8 +44,16 @@ export const ApiConfigSection: React.FC<ApiConfigSectionProps> = ({
   setUseCustomApiConfig,
   apiKey,
   setApiKey,
+  openAiApiKey,
+  setOpenAiApiKey,
+  anthropicApiKey,
+  setAnthropicApiKey,
   apiProxyUrl,
   setApiProxyUrl,
+  openAiApiBase,
+  setOpenAiApiBase,
+  anthropicApiBase,
+  setAnthropicApiBase,
   useApiProxy,
   setUseApiProxy,
   serverManagedApi,
@@ -50,10 +66,19 @@ export const ApiConfigSection: React.FC<ApiConfigSectionProps> = ({
   const [testModelId, setTestModelId] = useState<string>(DEFAULT_AUTO_CANVAS_MODEL_ID);
   const [allowOverflow, setAllowOverflow] = useState(useCustomApiConfig);
   const overflowTimerRef = useRef<number | null>(null);
-  const viteEnv = (import.meta as ImportMeta & { env?: { VITE_GEMINI_API_KEY?: string } }).env;
+  const viteEnv = (import.meta as ImportMeta & {
+    env?: {
+      VITE_GEMINI_API_KEY?: string;
+      VITE_OPENAI_API_KEY?: string;
+      VITE_ANTHROPIC_API_KEY?: string;
+    };
+  }).env;
 
   const iconSize = useResponsiveValue(18, 20);
-  const hasEnvKey = !!viteEnv?.VITE_GEMINI_API_KEY;
+  const hasGeminiEnvKey = !!viteEnv?.VITE_GEMINI_API_KEY;
+  const hasOpenAiEnvKey = !!viteEnv?.VITE_OPENAI_API_KEY;
+  const hasAnthropicEnvKey = !!viteEnv?.VITE_ANTHROPIC_API_KEY;
+  const hasEnvKey = hasGeminiEnvKey || hasOpenAiEnvKey || hasAnthropicEnvKey;
   const inputBaseClasses = "w-full p-3 rounded-lg border transition-all duration-200 focus:ring-2 focus:ring-offset-0 text-sm custom-scrollbar font-mono";
   const canUseServerManagedTestKey = isServerManagedApiEnabledForProxyRequests({
     serverManagedApi,
@@ -93,7 +118,7 @@ export const ApiConfigSection: React.FC<ApiConfigSectionProps> = ({
   const handleTestConnection = async () => {
     const resolveKeyToTest = (): string | null => {
       if (apiKey) return apiKey;
-      if (!useCustomApiConfig && hasEnvKey) {
+      if (!useCustomApiConfig && hasGeminiEnvKey) {
         return viteEnv?.VITE_GEMINI_API_KEY || null;
       }
       if (canUseServerManagedTestKey) return SERVER_MANAGED_API_KEY;
@@ -160,7 +185,7 @@ export const ApiConfigSection: React.FC<ApiConfigSectionProps> = ({
           hasEnvKey={hasEnvKey}
         />
 
-        <div className={`transition-all duration-300 ease-in-out ${useCustomApiConfig ? 'opacity-100 max-h-[800px] pt-4' : 'opacity-50 max-h-0'} ${allowOverflow ? 'overflow-visible' : 'overflow-hidden'}`}>
+        <div className={`transition-all duration-300 ease-in-out ${useCustomApiConfig ? 'opacity-100 max-h-[1100px] pt-4' : 'opacity-50 max-h-0'} ${allowOverflow ? 'overflow-visible' : 'overflow-hidden'}`}>
           <div className="space-y-5">
             <ApiKeyInput
               apiKey={apiKey}
@@ -168,6 +193,30 @@ export const ApiConfigSection: React.FC<ApiConfigSectionProps> = ({
                 setApiKey(val);
                 setTestStatus('idle');
               }}
+            />
+
+            <ApiKeyInput
+              apiKey={openAiApiKey}
+              setApiKey={(val) => {
+                setOpenAiApiKey(val);
+                setTestStatus('idle');
+              }}
+              labelKey="settingsOpenAiApiKey"
+              helpTextKey="settingsOpenAiApiKeyHelpText"
+              placeholderKey="apiConfig_openai_key_placeholder"
+              inputId="openai-api-key-input"
+            />
+
+            <ApiKeyInput
+              apiKey={anthropicApiKey}
+              setApiKey={(val) => {
+                setAnthropicApiKey(val);
+                setTestStatus('idle');
+              }}
+              labelKey="settingsAnthropicApiKey"
+              helpTextKey="settingsAnthropicApiKeyHelpText"
+              placeholderKey="apiConfig_anthropic_key_placeholder"
+              inputId="anthropic-api-key-input"
             />
 
             <ApiProxySettings
@@ -182,6 +231,50 @@ export const ApiConfigSection: React.FC<ApiConfigSectionProps> = ({
                 setTestStatus('idle');
               }}
             />
+
+            <div className="space-y-2 pt-2">
+              <label htmlFor="openai-api-base-input" className="text-xs font-semibold uppercase tracking-wider text-[var(--theme-text-tertiary)]">
+                {t('settingsOpenAiBaseUrl')}
+              </label>
+              <p className="text-xs leading-relaxed text-[var(--theme-text-tertiary)]">
+                {t('settingsOpenAiBaseUrlHelpText')}
+              </p>
+              <input
+                id="openai-api-base-input"
+                type="text"
+                value={openAiApiBase || ''}
+                onChange={(e) => {
+                  const value = e.target.value.trim();
+                  setOpenAiApiBase(value || null);
+                  setTestStatus('idle');
+                }}
+                className={`${inputBaseClasses} ${SETTINGS_INPUT_CLASS}`}
+                placeholder={t('apiConfig_openai_base_placeholder')}
+                aria-label={t('settingsOpenAiBaseUrl')}
+              />
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <label htmlFor="anthropic-api-base-input" className="text-xs font-semibold uppercase tracking-wider text-[var(--theme-text-tertiary)]">
+                {t('settingsAnthropicBaseUrl')}
+              </label>
+              <p className="text-xs leading-relaxed text-[var(--theme-text-tertiary)]">
+                {t('settingsAnthropicBaseUrlHelpText')}
+              </p>
+              <input
+                id="anthropic-api-base-input"
+                type="text"
+                value={anthropicApiBase || ''}
+                onChange={(e) => {
+                  const value = e.target.value.trim();
+                  setAnthropicApiBase(value || null);
+                  setTestStatus('idle');
+                }}
+                className={`${inputBaseClasses} ${SETTINGS_INPUT_CLASS}`}
+                placeholder={t('apiConfig_anthropic_base_placeholder')}
+                aria-label={t('settingsAnthropicBaseUrl')}
+              />
+            </div>
 
             <div className="space-y-2 pt-2">
               <label htmlFor="live-token-endpoint-input" className="text-xs font-semibold uppercase tracking-wider text-[var(--theme-text-tertiary)]">

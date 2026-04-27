@@ -27,6 +27,22 @@ export const appearanceSettings = {
     isAutoTitleEnabled_tooltip: { en: 'Automatically generate a title for a new chat after the first exchange using a fast model.', zh: '在新对话首次往返后，使用快速模型自动生成标题。' },
     settings_enableCompletionNotification_label: { en: 'Background Completion Notifications', zh: '后台完成通知' },
     settings_enableCompletionNotification_tooltip: { en: 'Show a browser notification when a response is finished generating while the tab is in the background.', zh: '当标签页在后台时，在响应生成完毕后显示浏览器通知。' },
+    settings_notificationPermission_notSupported: {
+        en: 'Desktop notifications are not supported by your browser.',
+        zh: '当前浏览器不支持桌面通知。',
+    },
+    settings_notificationPermission_blocked: {
+        en: 'Notifications are blocked by your browser. This permission cannot be enabled directly by the app after it has been blocked.',
+        zh: '浏览器已经拦截了通知权限。权限被拒绝后，网页无法直接替你重新开启。',
+    },
+    settings_notificationPermission_steps: {
+        en: 'Please click the lock/site icon on the left side of the address bar, open Site settings, set Notifications to Allow, then refresh this page.',
+        zh: '请点击地址栏左侧的锁形/站点信息图标，进入网站设置，把“通知”改为“允许”，然后刷新当前页面。',
+    },
+    settings_notificationPermission_httpsHint: {
+        en: 'Tip: browser notifications usually require HTTPS or localhost. If you are visiting the server through plain http://IP:28080, bind a domain name and enable HTTPS in 1Panel first.',
+        zh: '提示：浏览器通知通常要求 HTTPS 或 localhost。如果你现在是通过 http://服务器IP:28080 访问，建议先在 1Panel 绑定域名并开启 HTTPS。',
+    },
     settings_enableCompletionSound_label: { en: 'Completion Sound', zh: '完成提示音' },
     settings_enableCompletionSound_tooltip: { en: 'Play a notification sound when a response is finished generating.', zh: '当响应生成完毕时播放提示音。' },
     settings_enableSuggestions_label: { en: 'Reply Suggestions', zh: '回复建议' },

@@ -13,6 +13,8 @@ import {
 } from '../../utils/modelHelpers';
 import { DEFAULT_GEMINI_API_BASE_URL, normalizeGeminiApiBaseUrl } from "../../utils/apiProxyUrl";
 import { loadDeepSearchSystemPrompt, loadLocalPythonSystemPrompt } from "../../constants/promptHelpers";
+import { SERVER_MANAGED_API_APP_SETTING_DEFAULTS, getDefaultAppSettings } from "../../constants/appConstants";
+import { getRuntimeConfigAppSettingsOverrides } from "../../runtime/runtimeConfig";
 
 
 const POLLING_INTERVAL_MS = 2000; // 2 seconds
@@ -164,6 +166,17 @@ export const getApiClient = async (
     return await getClient(apiKey, baseUrl, httpOptions);
 };
 
+export const getEffectiveApiRequestSettings = async (): Promise<AppSettings> => {
+    const storedSettings = await dbService.getAppSettings();
+
+    return {
+        ...getDefaultAppSettings(),
+        ...(storedSettings ?? {}),
+        ...SERVER_MANAGED_API_APP_SETTING_DEFAULTS,
+        ...getRuntimeConfigAppSettingsOverrides(),
+    };
+};
+
 /**
  * Async helper to get an API client with settings (proxy, etc) loaded from DB.
  * Respects the `useApiProxy` toggle.
@@ -172,16 +185,16 @@ export const getConfiguredApiClient = async (
   apiKey: string,
   httpOptions?: ClientHttpOptions,
 ): Promise<GoogleGenAI> => {
-    const settings = await dbService.getAppSettings();
+    const settings = await getEffectiveApiRequestSettings();
     
     // Only use the proxy URL if Custom Config AND Use Proxy are both enabled
     // Explicitly check for truthiness to handle undefined/null
-    const shouldUseProxy = !!(settings?.useCustomApiConfig && settings?.useApiProxy);
-    const apiProxyUrl = shouldUseProxy ? settings?.apiProxyUrl : null;
+    const shouldUseProxy = !!(settings.useCustomApiConfig && settings.useApiProxy);
+    const apiProxyUrl = shouldUseProxy ? settings.apiProxyUrl : null;
     
-    if (settings?.useCustomApiConfig && !shouldUseProxy) {
+    if (settings.useCustomApiConfig && !shouldUseProxy) {
         // Debugging aid: if user expects proxy but it's not active
-        if (settings?.apiProxyUrl && !settings?.useApiProxy) {
+        if (settings.apiProxyUrl && !settings.useApiProxy) {
              logService.debug("[API Config] Proxy URL present but 'Use API Proxy' toggle is OFF.");
         }
     }
@@ -197,19 +210,15 @@ const resolveConfiguredBaseUrl = (
 };
 
 export const getConfiguredApiBaseUrl = async (): Promise<string> => {
-    const settings = await dbService.getAppSettings();
-    const configuredBaseUrl = settings
-        ? resolveConfiguredBaseUrl(settings)
-        : null;
+    const settings = await getEffectiveApiRequestSettings();
+    const configuredBaseUrl = resolveConfiguredBaseUrl(settings);
 
     return normalizeGeminiApiBaseUrl(configuredBaseUrl ?? DEFAULT_GEMINI_API_BASE_URL);
 };
 
 export const getConfiguredProxyBaseUrl = async (): Promise<string | null> => {
-    const settings = await dbService.getAppSettings();
-    const configuredBaseUrl = settings
-        ? resolveConfiguredBaseUrl(settings)
-        : null;
+    const settings = await getEffectiveApiRequestSettings();
+    const configuredBaseUrl = resolveConfiguredBaseUrl(settings);
 
     return configuredBaseUrl ? normalizeGeminiApiBaseUrl(configuredBaseUrl) : null;
 };
@@ -237,7 +246,13 @@ export const getLiveApiClient = async (
     appSettings: Pick<AppSettings, 'liveApiEphemeralTokenEndpoint' | 'useCustomApiConfig' | 'useApiProxy' | 'apiProxyUrl'>,
     httpOptions?: ClientHttpOptions,
 ): Promise<GoogleGenAI> => {
-    const endpoint = appSettings.liveApiEphemeralTokenEndpoint?.trim();
+    const effectiveAppSettings = {
+        ...getDefaultAppSettings(),
+        ...appSettings,
+        ...SERVER_MANAGED_API_APP_SETTING_DEFAULTS,
+        ...getRuntimeConfigAppSettingsOverrides(),
+    };
+    const endpoint = effectiveAppSettings.liveApiEphemeralTokenEndpoint?.trim();
 
     if (!endpoint) {
         throw new LiveApiAuthConfigurationError(
@@ -283,7 +298,7 @@ export const getLiveApiClient = async (
         );
     }
 
-    return getClient(token, resolveConfiguredBaseUrl(appSettings), httpOptions);
+    return getClient(token, resolveConfiguredBaseUrl(effectiveAppSettings), httpOptions);
 };
 
 const hasPerPartMediaResolution = (parts: Part[] = []): boolean =>

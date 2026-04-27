@@ -16,6 +16,14 @@ type MockGoogleGenAIConfig = {
 
 type StoredAppSettings = NonNullable<Awaited<ReturnType<typeof import('../../../utils/db').dbService.getAppSettings>>>;
 
+const getLatestGoogleGenAIConfig = (): MockGoogleGenAIConfig =>
+  vi.mocked(GoogleGenAI).mock.calls.at(-1)?.[0] as MockGoogleGenAIConfig;
+
+const expectGeminiProxyBaseUrl = (baseUrl: string | undefined) => {
+  expect(baseUrl).toBeTruthy();
+  expect(new URL(baseUrl!).pathname).toBe('/api/gemini');
+};
+
 // Mock @google/genai - must use function syntax for constructor mock
 vi.mock('@google/genai', () => ({
   GoogleGenAI: vi.fn(function(this: { config: MockGoogleGenAIConfig }, config: MockGoogleGenAIConfig) {
@@ -50,6 +58,10 @@ import {
   getLiveApiClient,
 } from '../baseApi';
 import { dbService } from '../../../utils/db';
+
+beforeEach(() => {
+  delete window.__AMC_RUNTIME_CONFIG__;
+});
 
 // ── getClient ──
 
@@ -129,19 +141,20 @@ describe('getConfiguredApiClient', () => {
     vi.clearAllMocks();
   });
 
-  it('uses proxy when both useCustomApiConfig and useApiProxy are true', async () => {
+  it('uses the workspace proxy default ahead of stale stored proxy settings', async () => {
     vi.mocked(dbService.getAppSettings).mockResolvedValue({
       useCustomApiConfig: true,
       useApiProxy: true,
       apiProxyUrl: 'https://proxy.example.com',
     } as StoredAppSettings);
     await getConfiguredApiClient('key');
-    expect(GoogleGenAI).toHaveBeenCalledWith(expect.objectContaining({
-      httpOptions: { baseUrl: 'https://proxy.example.com' },
-    }));
+    expectGeminiProxyBaseUrl(getLatestGoogleGenAIConfig().httpOptions?.baseUrl);
   });
 
   it('skips proxy when useApiProxy is false', async () => {
+    window.__AMC_RUNTIME_CONFIG__ = {
+      useApiProxy: false,
+    };
     vi.mocked(dbService.getAppSettings).mockResolvedValue({
       useCustomApiConfig: true,
       useApiProxy: false,
@@ -155,10 +168,44 @@ describe('getConfiguredApiClient', () => {
     const callArgs = vi.mocked(GoogleGenAI).mock.calls[0][0] as MockGoogleGenAIConfig;
     expect(callArgs.httpOptions?.baseUrl).toBeUndefined();
   });
+
+  it('uses workspace proxy defaults when stored settings are missing', async () => {
+    vi.mocked(dbService.getAppSettings).mockResolvedValue(null as unknown as StoredAppSettings);
+
+    await getConfiguredApiClient('key');
+
+    expectGeminiProxyBaseUrl(getLatestGoogleGenAIConfig().httpOptions?.baseUrl);
+  });
+
+  it('keeps server-managed proxy defaults ahead of stale stored settings', async () => {
+    vi.mocked(dbService.getAppSettings).mockResolvedValue({
+      useCustomApiConfig: false,
+      useApiProxy: false,
+      apiProxyUrl: null,
+    } as StoredAppSettings);
+
+    await getConfiguredApiClient('__SERVER_MANAGED_API_KEY__');
+
+    expect(GoogleGenAI).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: '__SERVER_MANAGED_API_KEY__',
+      httpOptions: expect.objectContaining({
+        baseUrl: expect.any(String),
+      }),
+    }));
+    expectGeminiProxyBaseUrl(getLatestGoogleGenAIConfig().httpOptions?.baseUrl);
+  });
 });
 
 describe('getLiveApiClient', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('throws a configuration error when the ephemeral token endpoint is missing', async () => {
+    window.__AMC_RUNTIME_CONFIG__ = {
+      liveApiEphemeralTokenEndpoint: null,
+    };
+
     await expect(
       getLiveApiClient(
         {
@@ -204,6 +251,10 @@ describe('getLiveApiClient', () => {
   });
 
   it('creates a client with an ephemeral token from the configured endpoint', async () => {
+    window.__AMC_RUNTIME_CONFIG__ = {
+      liveApiEphemeralTokenEndpoint: 'https://example.test/live-token',
+      useApiProxy: false,
+    };
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ name: 'ephemeral-token-name' }),
@@ -231,6 +282,10 @@ describe('getLiveApiClient', () => {
   });
 
   it('applies proxy baseUrl to the live client when proxying is enabled', async () => {
+    window.__AMC_RUNTIME_CONFIG__ = {
+      liveApiEphemeralTokenEndpoint: 'https://example.test/live-token',
+      apiProxyUrl: 'https://proxy.example.com/v1beta/',
+    };
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ token: 'ephemeral-token-name' }),

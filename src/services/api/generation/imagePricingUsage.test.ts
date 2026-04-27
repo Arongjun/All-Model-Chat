@@ -1,13 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { generateImagesMock, getConfiguredApiClientMock, recordTokenUsageMock } = vi.hoisted(() => ({
+const { generateImagesMock, getAppSettingsMock, getConfiguredApiClientMock, recordTokenUsageMock } = vi.hoisted(() => ({
   generateImagesMock: vi.fn(),
   getConfiguredApiClientMock: vi.fn(),
+  getAppSettingsMock: vi.fn(),
   recordTokenUsageMock: vi.fn(),
 }));
 
 vi.mock('../baseApi', () => ({
   getConfiguredApiClient: getConfiguredApiClientMock,
+  getEffectiveApiRequestSettings: async () => ({
+    useCustomApiConfig: true,
+    useApiProxy: false,
+    apiProxyUrl: null,
+    openAiApiBase: null,
+    ...(await getAppSettingsMock()),
+  }),
+}));
+
+vi.mock('../../../utils/db', () => ({
+  dbService: {
+    getAppSettings: getAppSettingsMock,
+  },
 }));
 
 vi.mock('../../logService', () => ({
@@ -25,6 +39,7 @@ import { generateImagesApi } from './imageApi';
 describe('image pricing usage logging', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getAppSettingsMock.mockResolvedValue(null);
     getConfiguredApiClientMock.mockResolvedValue({
       models: {
         generateImages: generateImagesMock,

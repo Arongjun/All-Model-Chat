@@ -1,7 +1,7 @@
 {
-  "name": "All Model Chat",
-  "short_name": "All Model Chat",
-  "description": "A React-based chatbot interface that interacts with the Gemini API, featuring system message configuration, streaming responses, context management, and model selection.",
+  "name": "阿荣AI工作站",
+  "short_name": "阿荣AI",
+  "description": "面向多用户、额度、兑换码和多模型接入的全能 AI 聊天工作站。",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

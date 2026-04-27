@@ -177,6 +177,48 @@ describe('settingsStore', () => {
       expect(appSettings.serverManagedApi).toBe(true);
     });
 
+    it('keeps runtime-managed API proxy settings ahead of stale stored settings', async () => {
+      mockGetRuntimeConfigAppSettingsOverrides.mockReturnValue({
+        serverManagedApi: true,
+        useCustomApiConfig: true,
+        useApiProxy: true,
+        apiProxyUrl: '/api/gemini',
+      });
+      vi.mocked(dbService.getAppSettings).mockResolvedValue({
+        serverManagedApi: false,
+        useCustomApiConfig: false,
+        useApiProxy: false,
+        apiProxyUrl: null,
+      } as any);
+
+      await useSettingsStore.getState().loadSettings();
+
+      const { appSettings } = useSettingsStore.getState();
+      expect(appSettings.serverManagedApi).toBe(true);
+      expect(appSettings.useCustomApiConfig).toBe(true);
+      expect(appSettings.useApiProxy).toBe(true);
+      expect(appSettings.apiProxyUrl).toBe('/api/gemini');
+    });
+
+    it('keeps server-managed API proxy defaults ahead of stale stored settings', async () => {
+      vi.mocked(dbService.getAppSettings).mockResolvedValue({
+        serverManagedApi: false,
+        useCustomApiConfig: false,
+        useApiProxy: false,
+        apiProxyUrl: null,
+        liveApiEphemeralTokenEndpoint: null,
+      } as any);
+
+      await useSettingsStore.getState().loadSettings();
+
+      const { appSettings } = useSettingsStore.getState();
+      expect(appSettings.serverManagedApi).toBe(true);
+      expect(appSettings.useCustomApiConfig).toBe(true);
+      expect(appSettings.useApiProxy).toBe(true);
+      expect(appSettings.apiProxyUrl).toBe('/api/gemini');
+      expect(appSettings.liveApiEphemeralTokenEndpoint).toBe('/api/live-token');
+    });
+
     it('handles DB errors gracefully', async () => {
       vi.mocked(dbService.getAppSettings).mockRejectedValue(new Error('DB fail'));
       await useSettingsStore.getState().loadSettings();

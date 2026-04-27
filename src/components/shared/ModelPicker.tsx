@@ -27,6 +27,7 @@ export const getModelIcon = (model: ModelOption | undefined) => {
         isNativeAudioModel,
         isTtsModel,
         isRealImagenModel,
+        isOpenAiImageModel,
         isGemini3ImageModel,
         isFlashImageModel,
         isGemmaModel,
@@ -37,6 +38,7 @@ export const getModelIcon = (model: ModelOption | undefined) => {
 
     if (isTtsModel) return <Speech size={MODEL_ICON_SIZE} className="text-purple-500 dark:text-purple-400 flex-shrink-0" strokeWidth={1.5} />;
     if (isRealImagenModel) return <ImageIcon size={MODEL_ICON_SIZE} className="text-rose-500 dark:text-rose-400 flex-shrink-0" strokeWidth={1.5} />;
+    if (isOpenAiImageModel) return <ImageIcon size={MODEL_ICON_SIZE} className="text-emerald-500 dark:text-emerald-400 flex-shrink-0" strokeWidth={1.5} />;
     if (isGemini3ImageModel || isFlashImageModel) return <Banana size={MODEL_ICON_SIZE} className="text-yellow-500 dark:text-yellow-400 flex-shrink-0" strokeWidth={1.5} />;
     if (isGeminiRoboticsModel(id)) return <ScanEye size={MODEL_ICON_SIZE} className="text-emerald-500 dark:text-emerald-400 flex-shrink-0" strokeWidth={1.5} />;
     if (isGemmaModel) return <Layers3 size={MODEL_ICON_SIZE} className="text-violet-500 dark:text-violet-400 flex-shrink-0" strokeWidth={1.5} />;

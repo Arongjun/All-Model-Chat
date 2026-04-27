@@ -2,11 +2,16 @@ import { create } from 'zustand';
 import { AppSettings } from '../types';
 import type { SyncMessage } from '../types/sync';
 import { Theme } from '../types/theme';
-import { DEFAULT_FILES_API_CONFIG, getDefaultAppSettings } from '../constants/appConstants';
+import {
+  DEFAULT_FILES_API_CONFIG,
+  SERVER_MANAGED_API_APP_SETTING_DEFAULTS,
+  getDefaultAppSettings,
+} from '../constants/appConstants';
 import { AVAILABLE_THEMES, DEFAULT_THEME_ID } from '../constants/themeConstants';
 import { logService } from '../services/logService';
 import { resolveSupportedModelId } from '../utils/modelHelpers';
 import { dbService } from '../utils/db';
+import { getRuntimeConfigAppSettingsOverrides } from '../runtime/runtimeConfig';
 
 interface SettingsState {
   appSettings: AppSettings;
@@ -45,13 +50,19 @@ function computeTheme(themeId: string): Theme {
 
 function sanitizeAppSettings(settings: AppSettings): AppSettings {
   const defaultSettings = getDefaultAppSettings();
-  return {
+  const sanitizedSettings = {
     ...settings,
     modelId: resolveSupportedModelId(settings.modelId, defaultSettings.modelId),
     transcriptionModelId: resolveSupportedModelId(
       settings.transcriptionModelId,
       defaultSettings.transcriptionModelId,
     ),
+  };
+
+  return {
+    ...sanitizedSettings,
+    ...SERVER_MANAGED_API_APP_SETTING_DEFAULTS,
+    ...getRuntimeConfigAppSettingsOverrides(),
   };
 }
 

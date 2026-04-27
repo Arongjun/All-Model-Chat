@@ -89,7 +89,11 @@ const STRING_KEYS = [
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 const NULLABLE_STRING_KEYS = [
     'apiKey',
+    'openAiApiKey',
+    'anthropicApiKey',
     'apiProxyUrl',
+    'openAiApiBase',
+    'anthropicApiBase',
     'liveApiEphemeralTokenEndpoint',
     'lockedApiKey',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;

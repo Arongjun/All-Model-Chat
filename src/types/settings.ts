@@ -73,7 +73,11 @@ export interface AppSettings extends ChatSettings {
  useCustomApiConfig: boolean;
  serverManagedApi?: boolean;
  apiKey: string | null;
+ openAiApiKey?: string | null;
+ anthropicApiKey?: string | null;
  apiProxyUrl: string | null;
+ openAiApiBase?: string | null;
+ anthropicApiBase?: string | null;
  useApiProxy?: boolean;
  liveApiEphemeralTokenEndpoint?: string | null;
  language: 'en' | 'zh' | 'system';

@@ -102,6 +102,26 @@ const MODEL_REGISTRY: RegisteredModel[] = [
     name: 'Imagen 4.0 Ultra',
     groups: ['image'],
   },
+  {
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    groups: ['image'],
+  },
+  {
+    id: 'gpt-image-1.5',
+    name: 'GPT Image 1.5',
+    groups: ['image'],
+  },
+  {
+    id: 'gpt-image-1',
+    name: 'GPT Image 1',
+    groups: ['image'],
+  },
+  {
+    id: 'gpt-image-1-mini',
+    name: 'GPT Image 1 Mini',
+    groups: ['image'],
+  },
 ];
 
 const getRegisteredModels = (group: ModelRegistryGroup) =>

@@ -27,6 +27,8 @@ const DEFAULT_IS_AUDIO_COMPRESSION_ENABLED = true;
 
 export const ACTIVE_CHAT_SESSION_ID_KEY = 'activeChatSessionId';
 export const API_KEY_LAST_USED_INDEX_KEY = 'chatApiKeyLastUsedIndex';
+export const OPENAI_API_KEY_LAST_USED_INDEX_KEY = 'openAiApiKeyLastUsedIndex';
+export const ANTHROPIC_API_KEY_LAST_USED_INDEX_KEY = 'anthropicApiKeyLastUsedIndex';
 export const CREATE_TEXT_FILE_EDITOR_LAST_EXTENSION_KEY = 'createTextFileEditorLastExtension';
 
 export const FOCUS_VISIBLE_RING_CLASS = "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-border-focus)] focus-visible:ring-offset-2";
@@ -86,16 +88,31 @@ export const DEFAULT_CHAT_SETTINGS = {
     mediaResolution: DEFAULT_MEDIA_RESOLUTION,
 };
 
+export const SERVER_MANAGED_API_APP_SETTING_DEFAULTS: Pick<
+    AppSettings,
+    'useCustomApiConfig' | 'serverManagedApi' | 'apiProxyUrl' | 'useApiProxy' | 'liveApiEphemeralTokenEndpoint'
+> = {
+    useCustomApiConfig: true,
+    serverManagedApi: true,
+    apiProxyUrl: "/api/gemini",
+    useApiProxy: true,
+    liveApiEphemeralTokenEndpoint: "/api/live-token",
+};
+
 const BASE_DEFAULT_APP_SETTINGS: AppSettings = {
     ...DEFAULT_CHAT_SETTINGS,
     themeId: 'pearl',
     baseFontSize: DEFAULT_BASE_FONT_SIZE,
-    useCustomApiConfig: false,
-    serverManagedApi: false,
+    useCustomApiConfig: SERVER_MANAGED_API_APP_SETTING_DEFAULTS.useCustomApiConfig,
+    serverManagedApi: SERVER_MANAGED_API_APP_SETTING_DEFAULTS.serverManagedApi,
     apiKey: null,
-    apiProxyUrl: "https://api-proxy.de/gemini",
-    useApiProxy: false,
-    liveApiEphemeralTokenEndpoint: null,
+    openAiApiKey: null,
+    anthropicApiKey: null,
+    apiProxyUrl: SERVER_MANAGED_API_APP_SETTING_DEFAULTS.apiProxyUrl,
+    openAiApiBase: null,
+    anthropicApiBase: null,
+    useApiProxy: SERVER_MANAGED_API_APP_SETTING_DEFAULTS.useApiProxy,
+    liveApiEphemeralTokenEndpoint: SERVER_MANAGED_API_APP_SETTING_DEFAULTS.liveApiEphemeralTokenEndpoint,
     language: 'system',
     isStreamingEnabled: DEFAULT_IS_STREAMING_ENABLED,
     transcriptionModelId: DEFAULT_TRANSCRIPTION_MODEL_ID,

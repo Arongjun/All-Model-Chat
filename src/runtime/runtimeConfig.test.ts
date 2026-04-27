@@ -16,6 +16,8 @@ describe('runtimeConfig', () => {
       useCustomApiConfig: true,
       useApiProxy: true,
       apiProxyUrl: 'https://proxy.runtime.example/v1beta',
+      openAiApiBase: 'https://openai-compatible.runtime.example/v1',
+      anthropicApiBase: 'https://anthropic-compatible.runtime.example',
       liveApiEphemeralTokenEndpoint: '/api/live-token',
     };
 
@@ -24,6 +26,8 @@ describe('runtimeConfig', () => {
       useCustomApiConfig: true,
       useApiProxy: true,
       apiProxyUrl: 'https://proxy.runtime.example/v1beta',
+      openAiApiBase: 'https://openai-compatible.runtime.example/v1',
+      anthropicApiBase: 'https://anthropic-compatible.runtime.example',
       liveApiEphemeralTokenEndpoint: '/api/live-token',
     });
   });
@@ -34,6 +38,8 @@ describe('runtimeConfig', () => {
       useCustomApiConfig: '1',
       useApiProxy: 'false',
       apiProxyUrl: '  ',
+      openAiApiBase: '  ',
+      anthropicApiBase: '  ',
       liveApiEphemeralTokenEndpoint: '   ',
     };
 
@@ -42,6 +48,8 @@ describe('runtimeConfig', () => {
       useCustomApiConfig: true,
       useApiProxy: false,
       apiProxyUrl: null,
+      openAiApiBase: null,
+      anthropicApiBase: null,
       liveApiEphemeralTokenEndpoint: null,
     });
   });

@@ -1,6 +1,6 @@
 
 import React, { useRef } from 'react';
-import { LayoutPanelLeft, SlidersHorizontal } from 'lucide-react';
+import { Building2, LayoutPanelLeft, SlidersHorizontal } from 'lucide-react';
 import { X } from 'lucide-react';
 import { SettingsTab, type SettingsTabDescriptor } from '../../hooks/features/useSettingsLogic';
 import { translations } from '../../utils/translations';
@@ -10,6 +10,7 @@ const SETTINGS_TAB_ICONS: Record<SettingsTab, React.ElementType> = {
     model: SlidersHorizontal,
     interface: LayoutPanelLeft,
     account: IconApiKey,
+    workspace: Building2,
     data: IconData,
     shortcuts: IconKeyboard,
     about: IconAbout,

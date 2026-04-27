@@ -1,9 +1,9 @@
-# All Model Chat
+# 阿荣AI工作站
 
 <div align="center">
 
   <p>
-    <strong>基于 Google Gemini API 的全能 AI 交互工作台</strong>
+    <strong>支持多用户、额度、兑换码和多家大模型接入的全能 AI 聊天工作站</strong>
   </p>
 
   <p>
@@ -20,7 +20,8 @@
     <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React">
     <img src="https://img.shields.io/badge/TypeScript-5.5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
     <img src="https://img.shields.io/badge/Tailwind-4.2-38BDF8?style=flat-square&logo=tailwind-css&logoColor=white" alt="Tailwind">
-    <img src="https://img.shields.io/badge/Gemini_SDK-1.2+-8E75B2?style=flat-square&logo=google&logoColor=white" alt="Gemini SDK">
+    <img src="https://img.shields.io/badge/OpenAI_Compatible-Supported-111827?style=flat-square&logo=openai&logoColor=white" alt="OpenAI Compatible">
+    <img src="https://img.shields.io/badge/Anthropic_Compatible-Supported-d97706?style=flat-square" alt="Anthropic Compatible">
     <img src="https://img.shields.io/badge/PWA-Supported-5A0FC8?style=flat-square&logo=pwa&logoColor=white" alt="PWA">
   </p>
 
@@ -31,16 +32,16 @@
 ## 界面预览
 
 <p align="center">
-  <img src="./docs/screenshots/app-desktop.png" alt="All Model Chat 桌面端界面预览" width="100%">
+  <img src="./docs/screenshots/app-desktop.png" alt="阿荣AI工作站桌面端界面预览" width="100%">
 </p>
 
 ## 项目简介
 
-**All Model Chat** 是一款基于 React 18 的 AI 交互工作台，深度集成 Google Gemini 系列模型。项目坚持 **Local-First** 原则：聊天数据默认存储于浏览器 IndexedDB，在保障隐私的同时提供流畅体验；同时支持新增的独立后端部署模式，用于服务端托管 Gemini 密钥与代理请求。
+**阿荣AI工作站** 是基于 All Model Chat 原型继续扩展的全能 AI 聊天工作站。它不再限定为单一 Gemini 客户端，而是面向生产部署补齐了 OpenAI-compatible、Anthropic-compatible、自建中转、GPT/DALL-E 生图、多用户账号、积分额度、模型次数包、兑换码、充值订单和 SQLite 持久化能力。
 
 当前仓库围绕 **Vite + React SPA** 作为唯一主线构建形态：
 - **标准模式**：本地通过 Vite 开发 / 构建，适合日常开发与静态部署
-- **Docker 部署模式**：`web + api` 双服务部署，前端走 `/api/gemini/*` 与 `/api/live-token`
+- **Docker 部署模式**：`web + api` 双服务部署，前端走同源 `/api/*`，由后端统一代理模型、鉴权、额度扣减和后台配置
 - **静态前端 + 独立 API 模式**：前端部署到 Pages/CDN，后端单独托管 Node API 服务
 
 ---
@@ -83,8 +84,15 @@
 - **Imagen 4.0 图片生成**：支持 Fast / Standard / Ultra 三档，可配置宽高比与尺寸
 
 ### 企业级 API 管理
-- **多 Key 轮询**：支持填入多个 API Key 自动分担压力
-- **API 代理**：支持通过 SDK 原生 `baseUrl` 配置接入自定义 Gemini API 代理
+- **多供应商接入**：支持 Gemini、OpenAI-compatible、Anthropic-compatible 与自建中转 Base URL
+- **后台 API 配置**：管理员可在工作站后台维护 API Key/Base URL，SQLite 配置优先于环境变量
+- **服务端代理**：前端默认不持有真实密钥，聊天、生图和 Live token 通过后端代理统一处理
+
+### 工作站运营能力
+- **多用户账号**：支持管理员和普通用户，管理员可创建、停用和调整用户额度
+- **积分与次数包**：可按模型规则扣积分，也可为 `gpt-image-*` 等模型发放指定次数
+- **兑换码与充值订单**：支持兑换码充值、人工确认充值订单和完整用量审计
+- **SQLite 持久化**：用户、额度、订单、API 配置和审计记录保存在服务端 SQLite 数据库
 
 ### 多语言界面
 - 支持中文 / 英文 / 跟随系统三种语言设置
@@ -142,38 +150,38 @@ npm install
 npm run dev
 ```
 
-访问 `http://localhost:5173`，在 **设置 -> API 配置** 中填入你的 Gemini API Key。
+访问 `http://localhost:5173`。开发模式可以在 **设置 -> API 配置** 中填入浏览器端 Key；生产部署更推荐使用 Docker 后端代理和管理员后台配置 API。
 
 除了在界面中手动配置，也可在根目录创建 `.env.local`（仅前端开发模式使用）：
 
 ```bash
-GEMINI_API_KEY=your_api_key_here
+GEMINI_API_KEY=your_gemini_key
+OPENAI_API_KEY=your_openai_or_gateway_key
+ANTHROPIC_API_KEY=your_anthropic_or_gateway_key
 ```
 
 ### 方式二：Docker Compose（推荐生产部署）
 
 项目包含双容器部署：
 - `web`：Nginx 托管前端静态资源，并反向代理 `/api/*` 到 `api` 服务
-- `api`：Node 服务，提供 `/api/gemini/*` 代理与 `/api/live-token`
+- `api`：Node 服务，提供模型代理、多用户、额度、兑换码、充值订单、后台 API 配置和 SQLite 数据库
 
 运行方式：
 
 ```bash
 # 在仓库根目录
-npm run build
 docker compose up -d --build
 ```
 
-默认访问 `http://localhost:8080`。如需关闭后台运行可执行 `docker compose down`。
+默认访问 `http://localhost:28080`。如需关闭后台运行可执行 `docker compose down`。
 
 说明：
-- `web` 镜像默认直接打包宿主机已生成的 `dist/`，不再在容器内执行前端生产构建。
-- 修改前端代码后，请先重新执行 `npm run build`，再执行 `docker compose up -d --build`。
+- `web` 镜像会在 Docker 内执行前端生产构建，不需要提前上传 `dist/`。
+- SQLite 数据保存在 `workspace-data` 命名卷，不要删除该卷。
+- 更详细的 1Panel 部署步骤见 [docs/deployment/1panel-docker.md](docs/deployment/1panel-docker.md)。
 
 > ⚠️ 安全边界说明
-> 当前 `web + api` 代理方案定位为 **受信任/自托管环境**（trusted self-hosted deployment）。
-> 它用于隐藏服务端 `GEMINI_API_KEY` 并转发请求，但**本身并不足以**作为公开互联网下“无鉴权多用户 API 网关”。
-> 若要对公网开放，请额外引入鉴权、配额/限流、滥用防护、审计与租户隔离等能力。
+> 当前工作站已经具备账号、额度和审计能力，但正式对公网运营时仍建议叠加 HTTPS、反向代理限流、备份策略和管理员强密码。
 
 ### 运行时配置与环境变量
 
@@ -181,10 +189,15 @@ docker compose up -d --build
 
 | 变量名 | 用途 | 公开性 | 默认值 |
 | :--- | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | 后端调用 Gemini API 的真实密钥（`api` 服务读取） | **仅服务端** | 空（必须在生产环境提供） |
+| `GEMINI_API_KEY` | Gemini 密钥，可作为后台配置的启动兜底 | **仅服务端** | 空 |
+| `OPENAI_API_KEY` | OpenAI-compatible 密钥，可用于 GPT、DeepSeek、Qwen、自建中转和 GPT/DALL-E 生图 | **仅服务端** | 空 |
+| `ANTHROPIC_API_KEY` | Anthropic-compatible 密钥，可用于 Claude `/v1/messages` 路由 | **仅服务端** | 空 |
 | `PORT` | `api` 服务监听端口 | 仅服务端 | `3001` |
 | `GEMINI_API_BASE` | Gemini 上游地址（代理目标） | 仅服务端 | `https://generativelanguage.googleapis.com` |
+| `OPENAI_API_BASE` | OpenAI-compatible 上游地址 | 仅服务端 | `https://api.openai.com/v1` |
+| `ANTHROPIC_API_BASE` | Anthropic-compatible 上游地址 | 仅服务端 | `https://api.anthropic.com` |
 | `ALLOWED_ORIGINS` | 逗号分隔 CORS 白名单（跨域部署时使用） | 仅服务端 | 空 |
+| `WORKSPACE_DATABASE_FILE` | SQLite 数据库路径 | 仅服务端 | `server/data/arong-workspace.sqlite` |
 | `RUNTIME_SERVER_MANAGED_API` | 前端默认启用服务端托管 API | **公开运行时配置** | `true` |
 | `RUNTIME_USE_CUSTOM_API_CONFIG` | 前端默认启用“自定义 API 配置” | 公开运行时配置 | `true` |
 | `RUNTIME_USE_API_PROXY` | 前端默认启用 API 代理 | 公开运行时配置 | `true` |
@@ -193,8 +206,9 @@ docker compose up -d --build
 
 说明：
 - 上述 `RUNTIME_*` 会在容器启动时写入 `runtime-config.js`，可被浏览器读取，因此只能放“可公开”信息。
-- `GEMINI_API_KEY` 只应存在于后端环境变量，不应写入前端构建产物、`runtime-config.js` 或浏览器设置备份。
-- 前端在部署时默认依赖后端端点：`/api/gemini/*` 与 `/api/live-token`。
+- API Key 可以先放环境变量作为兜底，也可以部署完成后在管理员后台“模型 API 配置”里填写；后台 SQLite 配置优先于环境变量。
+- 后台支持“一键从环境变量导入”，但不会反向改写 Docker/1Panel 环境变量，也不会把完整密钥回显给浏览器。
+- 前端在部署时默认依赖后端端点：`/api/gemini/*`、`/api/openai/*`、`/api/anthropic/*` 与 `/api/live-token`。
 
 ### 方式三：Cloudflare Pages（静态前端）+ 独立 API 服务
 
@@ -276,11 +290,14 @@ GEMINI_API_KEY=your_key_here npm run verify:code-execution:api
 | **音频引擎** | AudioWorklet API（实时流处理）+ 浏览器端 Worker 音频预处理 / 压缩流程 |
 | **渲染引擎** | React-Markdown + KaTeX (公式) + Highlight.js (代码高亮) + Mermaid.js + Graphviz (viz.js) |
 | **Python 沙箱** | Pyodide (WASM)，Web Worker 内执行，预装科学计算库 |
-| **API 代理** | 基于 `@google/genai` SDK `httpOptions.baseUrl` 的 Gemini API 代理配置 |
+| **API 代理** | Gemini、OpenAI-compatible、Anthropic-compatible 服务端代理与后台 API 配置 |
+| **服务端持久化** | sql.js + SQLite 文件，保存用户、额度、兑换码、订单、API 配置和审计 |
 | **PWA** | Web App Manifest + `beforeinstallprompt` / `appinstalled` 安装事件处理 |
 | **部署形态** | Vite 标准构建 / Docker Compose（web+api）/ Cloudflare Pages + 独立 API |
 生产部署若采用服务端托管 API，前端默认请求后端端点：
 - `/api/gemini/*`
+- `/api/openai/*`
+- `/api/anthropic/*`
 - `/api/live-token`
 
 ---
@@ -288,7 +305,7 @@ GEMINI_API_KEY=your_key_here npm run verify:code-execution:api
 ## 项目结构
 
 ```
-All-Model-Chat/
+arong-ai-workstation/
 ├── src/                        # 前端应用源码（Vite SPA）
 │   ├── components/             # UI 组件（chat / message / layout / settings / modals 等）
 │   ├── hooks/                  # 业务 hooks（app / chat / chat-input / data-management / live-api / ui）
@@ -302,7 +319,7 @@ All-Model-Chat/
 │   ├── styles/                 # 全局样式、动画、Markdown 样式
 │   ├── App.tsx                 # 应用入口组件
 │   └── index.tsx               # React 挂载入口
-├── server/                     # 独立 Node API（/api/gemini/* 与 /api/live-token）
+├── server/                     # 独立 Node API（模型代理、工作站账号、额度与 SQLite）
 │   ├── src/
 │   └── tsconfig.json
 ├── public/                     # 静态资源与 runtime-config.js 模板
@@ -322,13 +339,12 @@ All-Model-Chat/
 
 ## 支持的模型
 
-| 类型 | 模型 |
-| :--- | :--- |
-| **Gemini 3.x** | gemini-3-flash-preview, gemini-3.1-flash-live-preview, gemini-3.1-flash-lite-preview, gemini-3.1-pro-preview |
-| **Gemma 4** | gemma-4-31b-it, gemma-4-26b-a4b-it |
-| **Imagen 4.0** | imagen-4.0-fast-generate-001, imagen-4.0-generate-001, imagen-4.0-ultra-generate-001 |
-| **图片生成** | gemini-2.5-flash-image, gemini-3-pro-image-preview, gemini-3.1-flash-image-preview |
-| **TTS** | gemini-3.1-flash-tts-preview (30+ 种语音) |
+模型不是写死为 README 里的几项。内置模型目录只是开箱即用的推荐项，实际可以接入：
+
+- **Gemini 原生模型**：走 `/api/gemini/*`，支持 Gemini、Gemma、Imagen、Live API 等能力。
+- **OpenAI-compatible 模型**：走 `/api/openai/*`，可接 GPT、DeepSeek、Qwen、Kimi、Moonshot、GLM、自建中转等兼容接口。
+- **OpenAI 生图模型**：`gpt-image-*`、`dall-e-*` 等走 OpenAI-compatible 生图代理，可按积分或指定次数包计费。
+- **Anthropic-compatible 模型**：走 `/api/anthropic/*`，支持 Claude 官方或兼容 `/v1/messages` 的网关。
 
 ---
 

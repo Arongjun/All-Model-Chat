@@ -5,7 +5,13 @@ import { getKeyForRequest } from '../../utils/apiUtils';
 import { buildContentParts, createChatHistoryForApi } from '../../utils/chat/builder';
 import { generateUniqueId } from '../../utils/chat/ids';
 import { performOptimisticSessionUpdate, generateSessionTitle, createMessage } from '../../utils/chat/session';
-import { isGemini3Model, isImageModel, shouldStripThinkingFromContext } from '../../utils/modelHelpers';
+import {
+  isGemini3Model,
+  isImageModel,
+  isAnthropicCompatibleChatModel,
+  isOpenAiCompatibleChatModel,
+  shouldStripThinkingFromContext,
+} from '../../utils/modelHelpers';
 import { DEFAULT_CHAT_SETTINGS, MODELS_SUPPORTING_RAW_MODE } from '../../constants/appConstants';
 import { UploadedFile, ChatMessage, ChatSettings as IndividualChatSettings } from '../../types';
 import { StandardChatProps } from './types';
@@ -221,6 +227,8 @@ export const useStandardChat = ({
         activeModelId,
         sessionToUpdate.hideThinkingInContext ?? appSettings.hideThinkingInContext,
       );
+      const isOpenAiCompatibleModel = isOpenAiCompatibleChatModel(activeModelId);
+      const isExternalCompatibleModel = isOpenAiCompatibleModel || isAnthropicCompatibleChatModel(activeModelId);
       const historyForChat = await createChatHistoryForApi(
         baseMessagesForApi,
         shouldStripThinking,
@@ -246,7 +254,8 @@ export const useStandardChat = ({
           !!sessionToUpdate.isLocalPythonEnabled
           && finalRole === 'user'
           && !isRawMode
-          && !isImageModel(activeModelId),
+          && !isImageModel(activeModelId)
+          && !isExternalCompatibleModel,
         inputFiles: collectLocalPythonInputFiles(
           [
             ...localPythonContextMessages,
@@ -273,6 +282,7 @@ export const useStandardChat = ({
         || !!sessionToUpdate.isUrlContextEnabled;
       const isLocalPythonEnabledForTurn =
         standardFunctionDeclarations.length > 0
+        && !isExternalCompatibleModel
         && (
           isGemini3Model(activeModelId)
           || !hasRequestedServerSideToolThatNeedsCombination
@@ -508,18 +518,20 @@ export const useStandardChat = ({
           content: keyResult.error,
           timestamp: new Date(),
         };
-        const newSessionId = generateUniqueId();
+        const targetSessionId = activeSessionId || generateUniqueId();
 
         updateAndPersistSessions((prev) =>
           performOptimisticSessionUpdate(prev, {
-            activeSessionId: null,
-            newSessionId,
+            activeSessionId,
+            newSessionId: targetSessionId,
             newMessages: [errorMessage],
-            settings: { ...DEFAULT_CHAT_SETTINGS, ...appSettings },
-            title: 'API Key Error',
+            settings: { ...DEFAULT_CHAT_SETTINGS, ...appSettings, ...settingsForApi },
+            title: activeSessionId ? undefined : 'API Key Error',
           })
         );
-        setActiveSessionId(newSessionId);
+        if (!activeSessionId) {
+          setActiveSessionId(targetSessionId);
+        }
         return;
       }
 
@@ -544,7 +556,10 @@ export const useStandardChat = ({
         (file) => file.uploadState === 'active' && !file.error && !file.isProcessing
       );
       const preferCodeExecutionFileInputs =
-        !!settingsForApi.isCodeExecutionEnabled && !settingsForApi.isLocalPythonEnabled;
+        !!settingsForApi.isCodeExecutionEnabled
+        && !settingsForApi.isLocalPythonEnabled
+        && !isOpenAiCompatibleChatModel(activeModelId)
+        && !isAnthropicCompatibleChatModel(activeModelId);
 
       const { contentParts: promptParts, enrichedFiles } = await buildContentParts(
         textToUse.trim(),

@@ -43,7 +43,12 @@ const getCategory = (model: ModelOption): ModelCatalogCategory => {
     return 'image';
   }
 
-  if (capabilities.isGemmaModel || id.toLowerCase().includes('gemini')) {
+  if (
+    capabilities.isGemmaModel
+    || capabilities.isOpenAiCompatibleChatModel
+    || capabilities.isAnthropicCompatibleChatModel
+    || id.toLowerCase().includes('gemini')
+  ) {
     return 'text';
   }
 

@@ -8,6 +8,8 @@ interface UseAppTitleProps {
   sessionTitle: string;
 }
 
+const APP_BRAND_NAME = '阿荣AI工作站';
+
 export const useAppTitle = ({
   isLoading,
   messages,
@@ -60,7 +62,7 @@ export const useAppTitle = ({
             : `Generating${timeDisplay}... | `;
       }
 
-      const suffix = sessionTitle === 'All Model Chat' ? '' : ' • All Model Chat';
+      const suffix = sessionTitle === APP_BRAND_NAME ? '' : ` | ${APP_BRAND_NAME}`;
       const cleanTitle = sessionTitle || 'New Chat';
       document.title = `${statusPrefix}${cleanTitle}${suffix}`;
     };

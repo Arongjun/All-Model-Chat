@@ -22,6 +22,9 @@ describe('buildModelCatalog', () => {
       { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview' },
       { id: 'gemma-4-31b-it', name: 'Gemma 4 31B IT' },
       { id: 'gemini-robotics-er-1.6-preview', name: 'Gemini Robotics-ER 1.6 Preview' },
+      { id: 'deepseek-chat', name: 'DeepSeek Chat' },
+      { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+      { id: 'openai:gemini-2.5-pro', name: 'Gemini via OpenAI Gateway' },
     ];
 
     const entries = buildModelCatalog(models);
@@ -50,6 +53,18 @@ describe('buildModelCatalog', () => {
       category: 'robotics',
       group: 'standard',
       badgeKeys: expect.arrayContaining(['robotics']),
+    });
+    expect(getEntry(entries, 'deepseek-chat')).toMatchObject({
+      category: 'text',
+      group: 'standard',
+    });
+    expect(getEntry(entries, 'claude-3-5-sonnet-latest')).toMatchObject({
+      category: 'text',
+      group: 'standard',
+    });
+    expect(getEntry(entries, 'openai:gemini-2.5-pro')).toMatchObject({
+      category: 'text',
+      group: 'standard',
     });
   });
 });

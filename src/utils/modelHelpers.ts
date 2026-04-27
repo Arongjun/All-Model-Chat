@@ -35,37 +35,123 @@ const isNativeAudioModel = (modelId: string): boolean => {
     return lowerId.includes('native-audio') || lowerId.includes('-live-');
 };
 
+const isTtsModel = (modelId: string): boolean => modelId.toLowerCase().includes('tts');
+
+export const stripModelProviderPrefix = (modelId: string): string =>
+    modelId.trim().replace(/^(openai|anthropic):/i, '').trim();
+
+export const hasOpenAiProviderPrefix = (modelId: string): boolean =>
+    modelId.trim().toLowerCase().startsWith('openai:');
+
+export const hasAnthropicProviderPrefix = (modelId: string): boolean =>
+    modelId.trim().toLowerCase().startsWith('anthropic:');
+
+const hasExplicitExternalProviderPrefix = (modelId: string): boolean =>
+    hasOpenAiProviderPrefix(modelId) || hasAnthropicProviderPrefix(modelId);
+
 const isGemini31FlashLiveModel = (modelId: string): boolean =>
-    modelId.toLowerCase().includes('gemini-3.1-flash-live');
+    !hasExplicitExternalProviderPrefix(modelId)
+    && stripModelProviderPrefix(modelId).toLowerCase().includes('gemini-3.1-flash-live');
 
 const isGemini31FlashImageModel = (modelId: string): boolean =>
-    modelId.toLowerCase().includes('gemini-3.1-flash-image');
+    !hasExplicitExternalProviderPrefix(modelId)
+    && stripModelProviderPrefix(modelId).toLowerCase().includes('gemini-3.1-flash-image');
+
+export const isOpenAiImageModel = (modelId: string): boolean => {
+    const lowerId = stripModelProviderPrefix(modelId).toLowerCase();
+    return (
+        lowerId.startsWith('gpt-image')
+        || lowerId.startsWith('chatgpt-image')
+        || lowerId.startsWith('dall-e-')
+    );
+};
 
 export const isGemmaModel = (modelId: string): boolean =>
-    !!modelId && modelId.toLowerCase().includes('gemma');
+    !!modelId
+    && !hasExplicitExternalProviderPrefix(modelId)
+    && stripModelProviderPrefix(modelId).toLowerCase().includes('gemma');
 
 export const isGeminiRoboticsModel = (modelId: string): boolean =>
-    !!modelId && modelId.toLowerCase().includes('gemini-robotics-er');
-
-const isTtsModel = (modelId: string): boolean => modelId.toLowerCase().includes('tts');
+    !!modelId
+    && !hasExplicitExternalProviderPrefix(modelId)
+    && stripModelProviderPrefix(modelId).toLowerCase().includes('gemini-robotics-er');
 
 const supportsThinkingLevel = (modelId: string): boolean =>
     !isTtsModel(modelId) && (isGemini3Model(modelId) || isGeminiRoboticsModel(modelId));
 
 const isGemini3ImageModel = (modelId: string): boolean => (
-    modelId === 'gemini-3-pro-image-preview' || modelId === 'gemini-3.1-flash-image-preview'
+    !hasExplicitExternalProviderPrefix(modelId)
+    && (
+        stripModelProviderPrefix(modelId) === 'gemini-3-pro-image-preview'
+        || stripModelProviderPrefix(modelId) === 'gemini-3.1-flash-image-preview'
+    )
 );
 
-const isFlashImageModel = (modelId: string): boolean => modelId.toLowerCase().includes('gemini-2.5-flash-image');
+const isFlashImageModel = (modelId: string): boolean =>
+    !hasExplicitExternalProviderPrefix(modelId)
+    && stripModelProviderPrefix(modelId).toLowerCase().includes('gemini-2.5-flash-image');
 
-const isRealImagenModel = (modelId: string): boolean => modelId.toLowerCase().includes('imagen');
+const isRealImagenModel = (modelId: string): boolean =>
+    !hasExplicitExternalProviderPrefix(modelId)
+    && stripModelProviderPrefix(modelId).toLowerCase().includes('imagen');
 
-export const isImageModel = (modelId: string): boolean => (
-    isRealImagenModel(modelId)
-    || isFlashImageModel(modelId)
-    || isGemini3ImageModel(modelId)
-    || (modelId.toLowerCase().includes('image') && !modelId.toLowerCase().includes('imagen'))
-);
+export const isGeminiNativeModel = (modelId: string): boolean => {
+    if (hasExplicitExternalProviderPrefix(modelId)) return false;
+
+    const lowerId = stripModelProviderPrefix(modelId).toLowerCase();
+    return (
+        lowerId.includes('gemini')
+        || lowerId.includes('gemma')
+        || lowerId.includes('imagen')
+    );
+};
+
+export const isAnthropicCompatibleChatModel = (modelId: string): boolean => {
+    const lowerId = stripModelProviderPrefix(modelId).toLowerCase();
+
+    if (!lowerId) return false;
+    if (hasOpenAiProviderPrefix(modelId)) return false;
+    if (hasAnthropicProviderPrefix(modelId)) {
+        return !isOpenAiImageModel(lowerId) && !isTtsModel(lowerId) && !isNativeAudioModel(lowerId);
+    }
+    if (isGeminiNativeModel(lowerId)) return false;
+    if (isOpenAiImageModel(lowerId)) return false;
+    if (isTtsModel(lowerId)) return false;
+    if (isNativeAudioModel(lowerId)) return false;
+
+    return lowerId.startsWith('claude-') || lowerId.startsWith('anthropic/');
+};
+
+export const isOpenAiCompatibleChatModel = (modelId: string): boolean => {
+    const lowerId = stripModelProviderPrefix(modelId).toLowerCase();
+
+    if (!lowerId) return false;
+    if (hasAnthropicProviderPrefix(modelId)) return false;
+    if (hasOpenAiProviderPrefix(modelId)) {
+        return !isOpenAiImageModel(lowerId) && !isTtsModel(lowerId) && !isNativeAudioModel(lowerId);
+    }
+    if (isGeminiNativeModel(lowerId)) return false;
+    if (isOpenAiImageModel(lowerId)) return false;
+    if (isAnthropicCompatibleChatModel(modelId)) return false;
+    if (isTtsModel(lowerId)) return false;
+    if (isNativeAudioModel(lowerId)) return false;
+
+    return true;
+};
+
+export const isImageModel = (modelId: string): boolean => {
+    if (hasExplicitExternalProviderPrefix(modelId) && !isOpenAiImageModel(modelId)) {
+        return false;
+    }
+
+    return (
+        isRealImagenModel(modelId)
+        || isOpenAiImageModel(modelId)
+        || isFlashImageModel(modelId)
+        || isGemini3ImageModel(modelId)
+        || (modelId.toLowerCase().includes('image') && !modelId.toLowerCase().includes('imagen'))
+    );
+};
 
 export const sortModels = (models: ModelOption[]): ModelOption[] => {
     const pinnedPriorityOrder: Record<string, number> = {
@@ -112,7 +198,8 @@ export const sortModels = (models: ModelOption[]): ModelOption[] => {
 // --- Helper for Model Capabilities ---
 export const isGemini3Model = (modelId: string): boolean => {
     if (!modelId) return false;
-    const lowerId = modelId.toLowerCase();
+    if (hasExplicitExternalProviderPrefix(modelId)) return false;
+    const lowerId = stripModelProviderPrefix(modelId).toLowerCase();
     return GEMINI_3_RO_MODELS.some(m => lowerId.includes(m)) || lowerId.includes('gemini-3-pro') || lowerId.includes('gemini-3.1-flash');
 };
 
@@ -122,12 +209,18 @@ export const getModelCapabilities = (modelId: string) => {
     const gemini3ImageModel = isGemini3ImageModel(modelId);
     const flashImageModel = isFlashImageModel(modelId);
     const realImagenModel = isRealImagenModel(modelId);
+    const openAiImageModel = isOpenAiImageModel(modelId);
+    const openAiCompatibleChatModel = isOpenAiCompatibleChatModel(modelId);
+    const anthropicCompatibleChatModel = isAnthropicCompatibleChatModel(modelId);
     const ttsModel = isTtsModel(modelId);
     const nativeAudioModel = isNativeAudioModel(modelId);
-    const imageModel = realImagenModel || flashImageModel || gemini3ImageModel;
+    const imageModel = realImagenModel || openAiImageModel || flashImageModel || gemini3ImageModel;
+    const standaloneImageGenerationModel = realImagenModel || openAiImageModel;
 
     let supportedAspectRatios: string[] | undefined;
     if (realImagenModel) {
+        supportedAspectRatios = ['1:1', '16:9', '9:16', '4:3', '3:4'];
+    } else if (openAiImageModel) {
         supportedAspectRatios = ['1:1', '16:9', '9:16', '4:3', '3:4'];
     } else if (isGemini31FlashImageModel(modelId)) {
         supportedAspectRatios = ['Auto', '1:1', '1:4', '1:8', '16:9', '9:16', '4:1', '4:3', '3:4', '3:2', '2:3', '4:5', '5:4', '8:1', '21:9'];
@@ -138,6 +231,8 @@ export const getModelCapabilities = (modelId: string) => {
     let supportedImageSizes: string[] | undefined;
     if (isGemini31FlashImageModel(modelId)) {
         supportedImageSizes = ['512', '1K', '2K', '4K'];
+    } else if (openAiImageModel) {
+        supportedImageSizes = ['1K', '2K', '4K'];
     } else if (gemini3ImageModel) {
         supportedImageSizes = ['1K', '2K', '4K'];
     } else if (realImagenModel && !modelId.toLowerCase().includes('fast')) {
@@ -151,9 +246,16 @@ export const getModelCapabilities = (modelId: string) => {
         isGemini3ImageModel: gemini3ImageModel,
         isFlashImageModel: flashImageModel,
         isRealImagenModel: realImagenModel,
+        isOpenAiImageModel: openAiImageModel,
+        isOpenAiCompatibleChatModel: openAiCompatibleChatModel,
+        isAnthropicCompatibleChatModel: anthropicCompatibleChatModel,
         isImagenModel: imageModel,
+        isStandaloneImageGenerationModel: standaloneImageGenerationModel,
+        isAttachmentlessImageModel: standaloneImageGenerationModel,
         isTtsModel: ttsModel,
         isNativeAudioModel: nativeAudioModel,
+        supportsImageOutputMode: gemini3ImageModel || flashImageModel,
+        supportsPersonGeneration: realImagenModel || gemini3ImageModel || flashImageModel,
         supportedAspectRatios,
         supportedImageSizes,
     };

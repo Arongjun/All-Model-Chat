@@ -1,8 +1,22 @@
 import { AppSettings, ChatSettings } from '../types';
-import { API_KEY_LAST_USED_INDEX_KEY } from '../constants/appConstants';
+import {
+    ANTHROPIC_API_KEY_LAST_USED_INDEX_KEY,
+    API_KEY_LAST_USED_INDEX_KEY,
+    OPENAI_API_KEY_LAST_USED_INDEX_KEY,
+    SERVER_MANAGED_API_APP_SETTING_DEFAULTS,
+} from '../constants/appConstants';
 import { logService } from '../services/logService';
+import { isAnthropicCompatibleChatModel, isOpenAiCompatibleChatModel, isOpenAiImageModel } from './modelHelpers';
+import { getRuntimeConfigAppSettingsOverrides } from '../runtime/runtimeConfig';
 
 export const SERVER_MANAGED_API_KEY = '__SERVER_MANAGED_API_KEY__';
+type ApiProvider = 'gemini' | 'openai' | 'anthropic';
+
+const PROVIDER_ROTATION_STORAGE_KEYS: Record<ApiProvider, string> = {
+    gemini: API_KEY_LAST_USED_INDEX_KEY,
+    openai: OPENAI_API_KEY_LAST_USED_INDEX_KEY,
+    anthropic: ANTHROPIC_API_KEY_LAST_USED_INDEX_KEY,
+};
 
 type ServerManagedProxyEligibility = Pick<
     AppSettings,
@@ -19,22 +33,39 @@ export const isServerManagedApiEnabledForProxyRequests = (
         appSettings.apiProxyUrl?.trim()
     );
 
-const getActiveApiConfig = (appSettings: AppSettings): { apiKeysString: string | null } => {
-    const envWithGeminiKey = (
+const getProviderForModel = (modelId: string): ApiProvider =>
+    isAnthropicCompatibleChatModel(modelId)
+        ? 'anthropic'
+        : isOpenAiImageModel(modelId) || isOpenAiCompatibleChatModel(modelId)
+          ? 'openai'
+          : 'gemini';
+
+const getActiveApiConfig = (appSettings: AppSettings, provider: ApiProvider): { apiKeysString: string | null } => {
+    const envWithApiKeys = (
         import.meta as ImportMeta & {
             env?: {
                 VITE_GEMINI_API_KEY?: string;
+                VITE_OPENAI_API_KEY?: string;
+                VITE_ANTHROPIC_API_KEY?: string;
             };
         }
     ).env;
 
     if (appSettings.useCustomApiConfig) {
         return {
-            apiKeysString: appSettings.apiKey,
+            apiKeysString: provider === 'anthropic'
+                ? appSettings.anthropicApiKey ?? null
+                : provider === 'openai'
+                  ? appSettings.openAiApiKey ?? null
+                  : appSettings.apiKey,
         };
     }
     return {
-        apiKeysString: envWithGeminiKey?.VITE_GEMINI_API_KEY || null,
+        apiKeysString: provider === 'anthropic'
+            ? envWithApiKeys?.VITE_ANTHROPIC_API_KEY || null
+            : provider === 'openai'
+              ? envWithApiKeys?.VITE_OPENAI_API_KEY || null
+              : envWithApiKeys?.VITE_GEMINI_API_KEY || null,
     };
 };
 
@@ -52,15 +83,22 @@ export const getKeyForRequest = (
     options: { skipIncrement?: boolean } = {},
 ): { key: string; isNewKey: boolean } | { error: string } => {
     const { skipIncrement = false } = options;
-    const shouldUseServerManagedMarker = isServerManagedApiEnabledForProxyRequests(appSettings);
+    const effectiveAppSettings = {
+        ...SERVER_MANAGED_API_APP_SETTING_DEFAULTS,
+        ...appSettings,
+        ...getRuntimeConfigAppSettingsOverrides(),
+    };
+    const provider = getProviderForModel(currentChatSettings.modelId);
+    const rotationStorageKey = PROVIDER_ROTATION_STORAGE_KEYS[provider];
+    const shouldUseServerManagedMarker = isServerManagedApiEnabledForProxyRequests(effectiveAppSettings);
 
     const logUsage = (key: string) => {
-        if (appSettings.useCustomApiConfig) {
+        if (effectiveAppSettings.useCustomApiConfig) {
             logService.recordApiKeyUsage(key);
         }
     };
 
-    const { apiKeysString } = getActiveApiConfig(appSettings);
+    const { apiKeysString } = getActiveApiConfig(effectiveAppSettings, provider);
     if (!apiKeysString) {
         if (shouldUseServerManagedMarker) {
             return { key: SERVER_MANAGED_API_KEY, isNewKey: false };
@@ -94,7 +132,7 @@ export const getKeyForRequest = (
 
     let lastUsedIndex = -1;
     try {
-        const storedIndex = localStorage.getItem(API_KEY_LAST_USED_INDEX_KEY);
+        const storedIndex = localStorage.getItem(rotationStorageKey);
         if (storedIndex !== null) {
             lastUsedIndex = parseInt(storedIndex, 10);
         }
@@ -113,7 +151,7 @@ export const getKeyForRequest = (
     } else {
         targetIndex = (lastUsedIndex + 1) % availableKeys.length;
         try {
-            localStorage.setItem(API_KEY_LAST_USED_INDEX_KEY, targetIndex.toString());
+            localStorage.setItem(rotationStorageKey, targetIndex.toString());
         } catch (e) {
             logService.error('Could not save last used API key index', e);
         }

@@ -152,6 +152,8 @@ export interface ChatInputToolbarProps {
   isImagenModel: boolean;
   isGemini3ImageModel?: boolean;
   isRealImagenModel?: boolean;
+  supportsImageOutputMode?: boolean;
+  supportsPersonGeneration?: boolean;
   isTtsModel?: boolean;
   ttsVoice?: string;
   setTtsVoice?: (voice: string) => void;
@@ -197,6 +199,7 @@ export interface ChatInputActionsProps {
   supportsBuiltInCustomToolCombination?: boolean;
   isGemmaModel?: boolean;
   isRealImagenModel?: boolean;
+  isAttachmentlessImageModel?: boolean;
   isGoogleSearchEnabled: boolean;
   onToggleGoogleSearch: () => void;
   isCodeExecutionEnabled: boolean;

@@ -8,9 +8,21 @@ interface ApiKeyInputProps {
     apiKey: string | null;
     setApiKey: (value: string | null) => void;
     onFocus?: () => void;
+    labelKey?: string;
+    helpTextKey?: string;
+    placeholderKey?: string;
+    inputId?: string;
 }
 
-export const ApiKeyInput: React.FC<ApiKeyInputProps> = ({ apiKey, setApiKey, onFocus }) => {
+export const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
+    apiKey,
+    setApiKey,
+    onFocus,
+    labelKey = 'settingsApiKey',
+    helpTextKey = 'settingsApiKeyHelpText',
+    placeholderKey = 'apiConfig_key_placeholder',
+    inputId = 'api-key-input',
+}) => {
     const { t } = useI18n();
     const [isFocused, setIsFocused] = useState(false);
 
@@ -20,12 +32,12 @@ export const ApiKeyInput: React.FC<ApiKeyInputProps> = ({ apiKey, setApiKey, onF
 
     return (
         <div className="space-y-2">
-            <label htmlFor="api-key-input" className="text-xs font-semibold uppercase tracking-wider text-[var(--theme-text-tertiary)]">
-                {t('settingsApiKey')}
+            <label htmlFor={inputId} className="text-xs font-semibold uppercase tracking-wider text-[var(--theme-text-tertiary)]">
+                {t(labelKey)}
             </label>
             <div className="relative">
                 <textarea
-                    id="api-key-input"
+                    id={inputId}
                     rows={3}
                     value={apiKey || ''}
                     onChange={(e) => {
@@ -37,7 +49,7 @@ export const ApiKeyInput: React.FC<ApiKeyInputProps> = ({ apiKey, setApiKey, onF
                     }}
                     onBlur={() => setIsFocused(false)}
                     className={`${inputBaseClasses} ${SETTINGS_INPUT_CLASS} resize-y min-h-[80px] ${apiKeyBlurClass}`}
-                    placeholder={t('apiConfig_key_placeholder')}
+                    placeholder={t(placeholderKey)}
                     spellCheck={false}
                 />
                 {!isFocused && apiKey && (
@@ -48,7 +60,7 @@ export const ApiKeyInput: React.FC<ApiKeyInputProps> = ({ apiKey, setApiKey, onF
             </div>
             <p className="text-xs text-[var(--theme-text-tertiary)] flex gap-1.5">
                 <Info size={14} className="flex-shrink-0 mt-0.5" strokeWidth={1.5} />
-                <span>{t('settingsApiKeyHelpText')}</span>
+                <span>{t(helpTextKey)}</span>
             </p>
         </div>
     );

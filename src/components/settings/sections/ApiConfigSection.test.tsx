@@ -67,8 +67,16 @@ describe('ApiConfigSection', () => {
             setUseCustomApiConfig={vi.fn()}
             apiKey={null}
             setApiKey={vi.fn()}
+            openAiApiKey={null}
+            setOpenAiApiKey={vi.fn()}
+            anthropicApiKey={null}
+            setAnthropicApiKey={vi.fn()}
             apiProxyUrl="https://proxy.example.com/v1beta"
             setApiProxyUrl={vi.fn()}
+            openAiApiBase={null}
+            setOpenAiApiBase={vi.fn()}
+            anthropicApiBase={null}
+            setAnthropicApiBase={vi.fn()}
             useApiProxy
             setUseApiProxy={vi.fn()}
             serverManagedApi
@@ -119,8 +127,16 @@ describe('ApiConfigSection', () => {
             setUseCustomApiConfig={vi.fn()}
             apiKey={null}
             setApiKey={vi.fn()}
+            openAiApiKey={null}
+            setOpenAiApiKey={vi.fn()}
+            anthropicApiKey={null}
+            setAnthropicApiKey={vi.fn()}
             apiProxyUrl={null}
             setApiProxyUrl={vi.fn()}
+            openAiApiBase={null}
+            setOpenAiApiBase={vi.fn()}
+            anthropicApiBase={null}
+            setAnthropicApiBase={vi.fn()}
             useApiProxy={false}
             setUseApiProxy={vi.fn()}
             serverManagedApi={false}
@@ -133,6 +149,8 @@ describe('ApiConfigSection', () => {
     });
 
     expect(container.textContent).toContain('API & Connections');
+    expect(container.textContent).toContain('OpenAI-Compatible API Keys');
+    expect(container.textContent).toContain('Anthropic-Compatible API Keys');
     expect(container.textContent).toContain('Test Connection');
 
     act(() => {
@@ -140,6 +158,8 @@ describe('ApiConfigSection', () => {
     });
 
     expect(container.textContent).toContain('API 与连接');
+    expect(container.textContent).toContain('OpenAI 兼容 API 密钥');
+    expect(container.textContent).toContain('Anthropic 兼容 API 密钥');
     expect(container.textContent).toContain('测试连通性');
   });
 });

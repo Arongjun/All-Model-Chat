@@ -145,7 +145,7 @@ export const chatInputTranslations = {
     messageSender_imageModelSupportsImageAndPdfOnly: { en: 'Nano Banana 2 supports image and PDF attachments only.', zh: 'Nano Banana 2 仅支持图片和 PDF 附件。' },
     messageSender_imageModelSupportsImageOnly: { en: 'This image model supports image attachments only.', zh: '这个图片模型仅支持图片附件。' },
     messageSender_imageReferenceLimit: { en: 'Gemini 3 image models support up to 14 reference images per request.', zh: 'Gemini 3 图片模型每次请求最多支持 14 张参考图。' },
-    messageSender_imagenTextOnly: { en: 'Imagen models support text prompts only.', zh: 'Imagen 模型仅支持文本提示词。' },
+    messageSender_imagenTextOnly: { en: 'This image model supports text prompts only.', zh: '这个图片模型仅支持文本提示词。' },
     messageSender_noModelSelected: { en: 'No model selected.', zh: '未选择模型。' },
     messageSender_errorSessionTitle: { en: 'Error', zh: '错误' },
     messageSender_apiKeyErrorSessionTitle: { en: 'API Key Error', zh: 'API 密钥错误' },

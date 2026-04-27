@@ -8,6 +8,7 @@ import { ChatBehaviorSection } from './sections/ChatBehaviorSection';
 import { DataManagementSection } from './sections/DataManagementSection';
 import { ShortcutsSection } from './sections/ShortcutsSection';
 import { AboutSection } from './sections/AboutSection';
+import { WorkspaceSection } from './sections/WorkspaceSection';
 import { SettingsTransferProps } from './settingsTypes';
 import type { LogViewerProps } from '../log-viewer/LogViewer';
 
@@ -122,8 +123,16 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
                         setUseCustomApiConfig={(val) => updateSetting('useCustomApiConfig', val)}
                         apiKey={currentSettings.apiKey}
                         setApiKey={(val) => updateSetting('apiKey', val)}
+                        openAiApiKey={currentSettings.openAiApiKey ?? null}
+                        setOpenAiApiKey={(val) => updateSetting('openAiApiKey', val)}
+                        anthropicApiKey={currentSettings.anthropicApiKey ?? null}
+                        setAnthropicApiKey={(val) => updateSetting('anthropicApiKey', val)}
                         apiProxyUrl={currentSettings.apiProxyUrl}
                         setApiProxyUrl={(val) => updateSetting('apiProxyUrl', val)}
+                        openAiApiBase={currentSettings.openAiApiBase ?? null}
+                        setOpenAiApiBase={(val) => updateSetting('openAiApiBase', val)}
+                        anthropicApiBase={currentSettings.anthropicApiBase ?? null}
+                        setAnthropicApiBase={(val) => updateSetting('anthropicApiBase', val)}
                         useApiProxy={currentSettings.useApiProxy ?? false}
                         setUseApiProxy={(val) => updateSetting('useApiProxy', val)}
                         serverManagedApi={currentSettings.serverManagedApi ?? false}
@@ -149,6 +158,11 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
                         onExportScenarios={onExportScenarios}
                         onReset={onReset}
                     />
+                </div>
+            )}
+            {activeTab === 'workspace' && (
+                <div className={animClass}>
+                    <WorkspaceSection />
                 </div>
             )}
             {activeTab === 'shortcuts' && (

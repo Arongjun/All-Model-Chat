@@ -7,7 +7,7 @@ import { cacheModelSettings, getCachedModelSettings, adjustThinkingBudget, getDe
 import { translations } from '../../utils/translations';
 import { MediaResolution } from '../../types/settings';
 
-export type SettingsTab = 'interface' | 'model' | 'account' | 'data' | 'shortcuts' | 'about';
+export type SettingsTab = 'interface' | 'model' | 'account' | 'workspace' | 'data' | 'shortcuts' | 'about';
 export type SettingsTabDescriptor = { id: SettingsTab; labelKey: string };
 
 const SETTINGS_TAB_STORAGE_KEY = 'chatSettingsLastTab';
@@ -40,7 +40,7 @@ export const useSettingsLogic = ({
     const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
         try {
             const saved = localStorage.getItem(SETTINGS_TAB_STORAGE_KEY);
-            const validTabs: SettingsTab[] = ['model', 'interface', 'account', 'data', 'shortcuts', 'about'];
+            const validTabs: SettingsTab[] = ['model', 'interface', 'account', 'workspace', 'data', 'shortcuts', 'about'];
             if (saved && validTabs.includes(saved as SettingsTab)) {
                 return saved as SettingsTab;
             }
@@ -203,6 +203,7 @@ export const useSettingsLogic = ({
         { id: 'model', labelKey: 'settingsTabModel' },
         { id: 'interface', labelKey: 'settingsTabInterface' },
         { id: 'account', labelKey: 'settingsTabAccount' },
+        { id: 'workspace', labelKey: 'settingsTabWorkspace' },
         { id: 'data', labelKey: 'settingsTabData' },
         { id: 'shortcuts', labelKey: 'settingsTabShortcuts' },
         { id: 'about', labelKey: 'settingsTabAbout' },

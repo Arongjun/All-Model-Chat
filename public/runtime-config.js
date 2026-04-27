@@ -1,7 +1,10 @@
 window.__AMC_RUNTIME_CONFIG__ = {
-  serverManagedApi: false,
-  useCustomApiConfig: false,
-  useApiProxy: false,
-  apiProxyUrl: 'https://api-proxy.de/gemini',
   ...(window.__AMC_RUNTIME_CONFIG__ || {}),
+  serverManagedApi: true,
+  useCustomApiConfig: true,
+  useApiProxy: true,
+  apiProxyUrl: '/api/gemini',
+  openAiApiBase: null,
+  anthropicApiBase: null,
+  liveApiEphemeralTokenEndpoint: '/api/live-token',
 };

@@ -8,19 +8,21 @@ import {
   useChatInputLayoutView,
 } from './ChatInputViewContext';
 
-const render = (node: React.ReactNode) => {
+const render = async (node: React.ReactNode) => {
   const container = document.createElement('div');
   const root = createRoot(container);
 
-  act(() => {
+  await act(async () => {
     root.render(node);
+    await Promise.resolve();
   });
 
   return {
     container,
-    unmount: () => {
-      act(() => {
+    unmount: async () => {
+      await act(async () => {
         root.unmount();
+        await Promise.resolve();
       });
     },
   };
@@ -47,7 +49,7 @@ describe('ChatInputViewContext', () => {
     vi.restoreAllMocks();
   });
 
-  it('requires the provider before chat input view hooks can be used', () => {
+  it('requires the provider before chat input view hooks can be used', async () => {
     const Consumer = () => {
       useChatInputActionsView();
       return null;
@@ -55,7 +57,7 @@ describe('ChatInputViewContext', () => {
 
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const { container, unmount } = render(
+    const { container, unmount } = await render(
       <ErrorBoundary>
         <Consumer />
       </ErrorBoundary>,
@@ -65,10 +67,10 @@ describe('ChatInputViewContext', () => {
       'useChatInputView must be used within ChatInputViewProvider',
     );
 
-    unmount();
+    await unmount();
   });
 
-  it('provides focused view slices to chat input children', () => {
+  it('provides focused view slices to chat input children', async () => {
     const value = {
       toolbarProps: {} as any,
       actionsProps: {
@@ -103,7 +105,7 @@ describe('ChatInputViewContext', () => {
       );
     };
 
-    const { container, unmount } = render(
+    const { container, unmount } = await render(
       <ChatInputViewProvider value={value}>
         <Consumer />
       </ChatInputViewProvider>,
@@ -112,6 +114,6 @@ describe('ChatInputViewContext', () => {
     expect(container.querySelector('[data-testid="can-send"]')?.textContent).toBe('true');
     expect(container.querySelector('[data-testid="fullscreen"]')?.textContent).toBe('true');
 
-    unmount();
+    await unmount();
   });
 });

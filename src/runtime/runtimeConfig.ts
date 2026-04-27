@@ -5,6 +5,8 @@ type RuntimeConfigKey =
   | 'useCustomApiConfig'
   | 'useApiProxy'
   | 'apiProxyUrl'
+  | 'openAiApiBase'
+  | 'anthropicApiBase'
   | 'liveApiEphemeralTokenEndpoint';
 
 type RuntimeConfigShape = Partial<Record<RuntimeConfigKey, unknown>>;
@@ -49,7 +51,7 @@ function readNullableString(value: unknown): string | null | undefined {
 export function getRuntimeConfigAppSettingsOverrides(): Partial<
   Pick<
     AppSettings,
-    'serverManagedApi' | 'useCustomApiConfig' | 'useApiProxy' | 'apiProxyUrl' | 'liveApiEphemeralTokenEndpoint'
+    'serverManagedApi' | 'useCustomApiConfig' | 'useApiProxy' | 'apiProxyUrl' | 'openAiApiBase' | 'anthropicApiBase' | 'liveApiEphemeralTokenEndpoint'
   >
 > {
   const runtimeConfig = typeof window !== 'undefined' ? window.__AMC_RUNTIME_CONFIG__ : undefined;
@@ -61,7 +63,7 @@ export function getRuntimeConfigAppSettingsOverrides(): Partial<
   const overrides: Partial<
     Pick<
       AppSettings,
-      'serverManagedApi' | 'useCustomApiConfig' | 'useApiProxy' | 'apiProxyUrl' | 'liveApiEphemeralTokenEndpoint'
+      'serverManagedApi' | 'useCustomApiConfig' | 'useApiProxy' | 'apiProxyUrl' | 'openAiApiBase' | 'anthropicApiBase' | 'liveApiEphemeralTokenEndpoint'
     >
   > = {};
 
@@ -83,6 +85,16 @@ export function getRuntimeConfigAppSettingsOverrides(): Partial<
   const apiProxyUrl = readNullableString(runtimeConfig.apiProxyUrl);
   if (apiProxyUrl !== undefined) {
     overrides.apiProxyUrl = apiProxyUrl;
+  }
+
+  const openAiApiBase = readNullableString(runtimeConfig.openAiApiBase);
+  if (openAiApiBase !== undefined) {
+    overrides.openAiApiBase = openAiApiBase;
+  }
+
+  const anthropicApiBase = readNullableString(runtimeConfig.anthropicApiBase);
+  if (anthropicApiBase !== undefined) {
+    overrides.anthropicApiBase = anthropicApiBase;
   }
 
   const liveApiEphemeralTokenEndpoint = readNullableString(runtimeConfig.liveApiEphemeralTokenEndpoint);

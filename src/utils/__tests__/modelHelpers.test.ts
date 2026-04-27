@@ -4,6 +4,8 @@ import {
   isGemini3Model,
   getModelCapabilities,
   getDefaultThinkingLevelForModel,
+  isAnthropicCompatibleChatModel,
+  isOpenAiCompatibleChatModel,
   shouldStripThinkingFromContext,
   sanitizeModelOptions,
   resolveSupportedModelId,
@@ -142,6 +144,36 @@ describe('getModelCapabilities', () => {
     expect(capabilities.supportedImageSizes).toEqual(
       expect.arrayContaining(['512', '1K', '2K', '4K']),
     );
+  });
+
+  it('classifies non-Gemini text models as OpenAI-compatible chat models', () => {
+    expect(isOpenAiCompatibleChatModel('gpt-4o')).toBe(true);
+    expect(isOpenAiCompatibleChatModel('deepseek-chat')).toBe(true);
+    expect(isOpenAiCompatibleChatModel('qwen-max')).toBe(true);
+    expect(isOpenAiCompatibleChatModel('openai:claude-3-5-sonnet-latest')).toBe(true);
+    expect(isOpenAiCompatibleChatModel('openai:gemini-2.5-pro')).toBe(true);
+  });
+
+  it('does not classify Gemini-native or image generation models as OpenAI-compatible chat', () => {
+    expect(isOpenAiCompatibleChatModel('gemini-3.1-pro-preview')).toBe(false);
+    expect(isOpenAiCompatibleChatModel('gemma-4-31b-it')).toBe(false);
+    expect(isOpenAiCompatibleChatModel('imagen-4.0-generate-001')).toBe(false);
+    expect(isOpenAiCompatibleChatModel('gpt-image-2')).toBe(false);
+    expect(isOpenAiCompatibleChatModel('claude-3-5-sonnet-latest')).toBe(false);
+  });
+
+  it('classifies Claude models as Anthropic-compatible chat models', () => {
+    expect(isAnthropicCompatibleChatModel('claude-3-5-sonnet-latest')).toBe(true);
+    expect(isAnthropicCompatibleChatModel('anthropic:claude-3-5-sonnet-latest')).toBe(true);
+    expect(isAnthropicCompatibleChatModel('openai:claude-3-5-sonnet-latest')).toBe(false);
+  });
+
+  it('does not expose Gemini-only capabilities for provider-prefixed gateway ids', () => {
+    const capabilities = getModelCapabilities('openai:gemini-3.1-pro-preview');
+
+    expect(capabilities.isGemini3).toBe(false);
+    expect(capabilities.supportsThinkingLevel).toBe(false);
+    expect(capabilities.isOpenAiCompatibleChatModel).toBe(true);
   });
 });
 
