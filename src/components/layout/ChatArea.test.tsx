@@ -42,7 +42,7 @@ const mockState = vi.hoisted(() => ({
 
 const dispatchTouchEvent = (
   node: Element,
-  type: 'touchstart' | 'touchend',
+  type: 'touchstart' | 'touchmove' | 'touchend',
   touches: Array<{ clientX: number; clientY: number }>,
 ) => {
   const event = new Event(type, { bubbles: true, cancelable: true });
@@ -220,6 +220,8 @@ describe('ChatArea provider slice memoization', () => {
   const virtualKeyboardShow = vi.fn();
 
   beforeEach(() => {
+    matchMediaMatches = false;
+    windowInnerWidth = 1024;
     vi.stubGlobal(
       'ResizeObserver',
       class ResizeObserver {
@@ -338,7 +340,7 @@ describe('ChatArea provider slice memoization', () => {
     expect(mockState.renders.chatInput.mock.calls.length).toBe(chatInputRenderCount);
   });
 
-  it('activates the composer and opens the virtual keyboard after a downward swipe in the chat area on mobile', () => {
+  it('does not activate the composer or virtual keyboard from a chat-area swipe on mobile', () => {
     matchMediaMatches = true;
     windowInnerWidth = 390;
     Object.defineProperty(window, 'innerWidth', {
@@ -368,8 +370,43 @@ describe('ChatArea provider slice memoization', () => {
       dispatchTouchEvent(chatArea!, 'touchend', [{ clientX: 102, clientY: 250 }]);
     });
 
-    expect(focusSpy).toHaveBeenCalledTimes(1);
-    expect(selectionSpy).toHaveBeenCalledWith(composer.value.length, composer.value.length);
-    expect(virtualKeyboardShow).toHaveBeenCalledTimes(1);
+    expect(focusSpy).not.toHaveBeenCalled();
+    expect(selectionSpy).not.toHaveBeenCalled();
+    expect(virtualKeyboardShow).not.toHaveBeenCalled();
+  });
+
+  it('dismisses a focused composer when the user scrolls message content on mobile', () => {
+    matchMediaMatches = true;
+    windowInnerWidth = 390;
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: windowInnerWidth,
+    });
+
+    const composer = document.createElement('textarea');
+    composer.setAttribute('aria-label', 'Chat message input');
+    document.body.appendChild(composer);
+    const blurSpy = vi.spyOn(composer, 'blur');
+    composer.focus();
+    expect(document.activeElement).toBe(composer);
+
+    const props = createChatAreaProps();
+
+    act(() => {
+      root.render(<ChatArea {...props} />);
+    });
+
+    const chatArea = container.querySelector('.chat-bg-enhancement');
+    expect(chatArea).not.toBeNull();
+
+    act(() => {
+      dispatchTouchEvent(chatArea!, 'touchstart', [{ clientX: 120, clientY: 260 }]);
+      dispatchTouchEvent(chatArea!, 'touchmove', [{ clientX: 120, clientY: 220 }]);
+    });
+
+    expect(blurSpy).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).not.toBe(composer);
+    expect(virtualKeyboardShow).not.toHaveBeenCalled();
   });
 });

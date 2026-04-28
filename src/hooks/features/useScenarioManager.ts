@@ -5,7 +5,7 @@ import { translations } from '../../utils/translations';
 import { generateUniqueId } from '../../utils/chat/ids';
 import { triggerDownload, sanitizeFilename } from '../../utils/export/core';
 import {
-  buildSavedScenarios,
+  buildSavedScenariosWithCurrentSystem,
   buildScenarioExportPayload,
   getExportableUserScenarios,
   mergeImportedScenarios,
@@ -53,6 +53,15 @@ export const useScenarioManager = ({
       JSON.stringify(getExportableUserScenarios(scenarios)) !== JSON.stringify(getExportableUserScenarios(savedScenarios)),
     [savedScenarios, scenarios],
   );
+  const systemScenarioIds = useMemo(
+    () => [
+      ...SYSTEM_SCENARIO_IDS,
+      ...scenarios
+        .filter((scenario) => scenario.managedBy === 'system')
+        .map((scenario) => scenario.id),
+    ],
+    [scenarios],
+  );
 
   const showFeedback = useCallback((type: 'success' | 'error' | 'info', message: string, duration: number = 3000) => {
     setFeedback({ type, message });
@@ -77,7 +86,7 @@ export const useScenarioManager = ({
       messages: scenario.messages.map(m => ({ ...m, id: generateUniqueId() })) // Deep copy messages with new IDs
     };
     
-    setScenarios(prev => buildSavedScenarios([newScenario, ...getExportableUserScenarios(prev)]));
+    setScenarios(prev => buildSavedScenariosWithCurrentSystem(prev, [newScenario, ...getExportableUserScenarios(prev)]));
     showFeedback('success', t('scenarios_feedback_duplicated'));
   }, [showFeedback, t]);
 
@@ -95,11 +104,12 @@ export const useScenarioManager = ({
       const nextUserScenarios = getExportableUserScenarios(prev);
       const existing = nextUserScenarios.find(s => s.id === scenarioToSave.id);
       if (existing) {
-        return buildSavedScenarios(
+        return buildSavedScenariosWithCurrentSystem(
+          prev,
           nextUserScenarios.map(s => s.id === scenarioToSave.id ? scenarioToSave : s),
         );
       }
-      return buildSavedScenarios([...nextUserScenarios, scenarioToSave]);
+      return buildSavedScenariosWithCurrentSystem(prev, [...nextUserScenarios, scenarioToSave]);
     });
     showFeedback('success', t('scenarios_feedback_saved'));
     setView('list');
@@ -107,7 +117,7 @@ export const useScenarioManager = ({
   }, [showFeedback, t]);
 
   const handleDeleteScenario = useCallback((id: string) => {
-    setScenarios(prev => buildSavedScenarios(getExportableUserScenarios(prev).filter(s => s.id !== id)));
+    setScenarios(prev => buildSavedScenariosWithCurrentSystem(prev, getExportableUserScenarios(prev).filter(s => s.id !== id)));
     showFeedback('info', t('scenarios_feedback_cleared', 'Scenario deleted.'));
   }, [showFeedback, t]);
 
@@ -158,7 +168,8 @@ export const useScenarioManager = ({
         if (data && data.type === 'AllModelChat-Scenarios' && Array.isArray(data.scenarios)) {
           const importedScenarios = data.scenarios as SavedScenario[];
           setScenarios(prev =>
-            buildSavedScenarios(
+            buildSavedScenariosWithCurrentSystem(
+              prev,
               mergeImportedScenarios({
                 existingScenarios: prev,
                 importedScenarios,
@@ -188,7 +199,7 @@ export const useScenarioManager = ({
     setSearchQuery,
     feedback,
     importInputRef,
-    systemScenarioIds: SYSTEM_SCENARIO_IDS,
+    systemScenarioIds,
     hasUnsavedChanges,
     showFeedback,
     actions: {

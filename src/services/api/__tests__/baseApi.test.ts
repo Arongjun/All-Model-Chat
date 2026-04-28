@@ -549,6 +549,34 @@ describe('buildGenerationConfig', () => {
     expect(config.thinkingConfig!.thinkingLevel).toBe('HIGH');
   });
 
+  it('maps OpenAI-compatible reasoning model levels to reasoning_effort without Gemini thinkingConfig', async () => {
+    const config = await buildGenerationConfig(
+      'openai:gpt-5.3-codex', 'sys', baseConfig, false, -1,
+      false, false, false, 'MEDIUM',
+    );
+
+    expect(config.openAiReasoningEffort).toBe('medium');
+    expect(config.thinkingConfig).toBeUndefined();
+  });
+
+  it('does not send OpenAI reasoning_effort when reasoning is turned off', async () => {
+    const config = await buildGenerationConfig(
+      'openai:gpt-5.3-codex', 'sys', baseConfig, false, 0,
+      false, false, false, 'HIGH',
+    );
+
+    expect(config.openAiReasoningEffort).toBeUndefined();
+  });
+
+  it('enables MiniMax reasoning split for direct OpenAI-compatible MiniMax endpoints', async () => {
+    const config = await buildGenerationConfig(
+      'openai:minimax-m2', 'sys', baseConfig, false, -1,
+    );
+
+    expect(config.openAiReasoningSplit).toBe(true);
+    expect(config.openAiReasoningEffort).toBeUndefined();
+  });
+
   it('downgrades ULTRA_HIGH to HIGH for non-Gemini 3 global media resolution', async () => {
     const config = await buildGenerationConfig(
       'gemini-2.5-flash',

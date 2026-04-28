@@ -12,7 +12,7 @@ export const sanitizeModelOptions = (models: ModelOption[]): ModelOption[] => {
     return models.reduce<ModelOption[]>((sanitized, model) => {
         const normalizedId = model.id.trim();
 
-        if (!normalizedId || seenIds.has(normalizedId)) {
+        if (!normalizedId || seenIds.has(normalizedId) || isUnsupportedOpenAiImageModelId(normalizedId)) {
             return sanitized;
         }
 
@@ -49,6 +49,18 @@ export const hasAnthropicProviderPrefix = (modelId: string): boolean =>
 const hasExplicitExternalProviderPrefix = (modelId: string): boolean =>
     hasOpenAiProviderPrefix(modelId) || hasAnthropicProviderPrefix(modelId);
 
+const OPENAI_IMAGE_MODEL_IDS = new Set(['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2']);
+
+export const isUnsupportedOpenAiImageModelId = (modelId: string): boolean => {
+    const lowerId = stripModelProviderPrefix(modelId).toLowerCase();
+
+    return (
+        (lowerId.startsWith('gpt-image') && !OPENAI_IMAGE_MODEL_IDS.has(lowerId))
+        || lowerId.startsWith('chatgpt-image')
+        || lowerId.startsWith('dall-e')
+    );
+};
+
 const isGemini31FlashLiveModel = (modelId: string): boolean =>
     !hasExplicitExternalProviderPrefix(modelId)
     && stripModelProviderPrefix(modelId).toLowerCase().includes('gemini-3.1-flash-live');
@@ -59,11 +71,7 @@ const isGemini31FlashImageModel = (modelId: string): boolean =>
 
 export const isOpenAiImageModel = (modelId: string): boolean => {
     const lowerId = stripModelProviderPrefix(modelId).toLowerCase();
-    return (
-        lowerId.startsWith('gpt-image')
-        || lowerId.startsWith('chatgpt-image')
-        || lowerId.startsWith('dall-e-')
-    );
+    return OPENAI_IMAGE_MODEL_IDS.has(lowerId);
 };
 
 export const isGemmaModel = (modelId: string): boolean =>
@@ -75,9 +83,6 @@ export const isGeminiRoboticsModel = (modelId: string): boolean =>
     !!modelId
     && !hasExplicitExternalProviderPrefix(modelId)
     && stripModelProviderPrefix(modelId).toLowerCase().includes('gemini-robotics-er');
-
-const supportsThinkingLevel = (modelId: string): boolean =>
-    !isTtsModel(modelId) && (isGemini3Model(modelId) || isGeminiRoboticsModel(modelId));
 
 const isGemini3ImageModel = (modelId: string): boolean => (
     !hasExplicitExternalProviderPrefix(modelId)
@@ -138,6 +143,49 @@ export const isOpenAiCompatibleChatModel = (modelId: string): boolean => {
 
     return true;
 };
+
+const getOpenAiCompatibleRawModelId = (modelId: string): string =>
+    stripModelProviderPrefix(modelId).toLowerCase().replace(/^models\//, '').trim();
+
+const hasGatewayNamespace = (modelId: string): boolean =>
+    getOpenAiCompatibleRawModelId(modelId).includes('/');
+
+const getModelIdLeaf = (modelId: string): string => {
+    const rawId = getOpenAiCompatibleRawModelId(modelId);
+    return rawId.split('/').filter(Boolean).pop() || rawId;
+};
+
+export const isOpenAiReasoningEffortModel = (modelId: string): boolean => {
+    if (!isOpenAiCompatibleChatModel(modelId) || hasGatewayNamespace(modelId)) {
+        return false;
+    }
+
+    const leafId = getModelIdLeaf(modelId);
+
+    return (
+        /^o\d/.test(leafId)
+        || leafId.startsWith('gpt-5')
+        || leafId.includes('codex')
+        || leafId.startsWith('gpt-oss')
+    );
+};
+
+export const isMiniMaxOpenAiReasoningSplitModel = (modelId: string): boolean => {
+    if (!isOpenAiCompatibleChatModel(modelId) || hasGatewayNamespace(modelId)) {
+        return false;
+    }
+
+    const leafId = getModelIdLeaf(modelId);
+    return leafId.includes('minimax-m') || leafId.includes('minimax_reasoning');
+};
+
+const supportsThinkingLevel = (modelId: string): boolean =>
+    !isTtsModel(modelId)
+    && (
+        isGemini3Model(modelId)
+        || isGeminiRoboticsModel(modelId)
+        || isOpenAiReasoningEffortModel(modelId)
+    );
 
 export const isImageModel = (modelId: string): boolean => {
     if (hasExplicitExternalProviderPrefix(modelId) && !isOpenAiImageModel(modelId)) {
@@ -211,6 +259,8 @@ export const getModelCapabilities = (modelId: string) => {
     const realImagenModel = isRealImagenModel(modelId);
     const openAiImageModel = isOpenAiImageModel(modelId);
     const openAiCompatibleChatModel = isOpenAiCompatibleChatModel(modelId);
+    const openAiReasoningEffortModel = isOpenAiReasoningEffortModel(modelId);
+    const miniMaxOpenAiReasoningSplitModel = isMiniMaxOpenAiReasoningSplitModel(modelId);
     const anthropicCompatibleChatModel = isAnthropicCompatibleChatModel(modelId);
     const ttsModel = isTtsModel(modelId);
     const nativeAudioModel = isNativeAudioModel(modelId);
@@ -221,7 +271,7 @@ export const getModelCapabilities = (modelId: string) => {
     if (realImagenModel) {
         supportedAspectRatios = ['1:1', '16:9', '9:16', '4:3', '3:4'];
     } else if (openAiImageModel) {
-        supportedAspectRatios = ['1:1', '16:9', '9:16', '4:3', '3:4'];
+        supportedAspectRatios = ['1:1', '3:2', '2:3'];
     } else if (isGemini31FlashImageModel(modelId)) {
         supportedAspectRatios = ['Auto', '1:1', '1:4', '1:8', '16:9', '9:16', '4:1', '4:3', '3:4', '3:2', '2:3', '4:5', '5:4', '8:1', '21:9'];
     } else if (gemini3ImageModel || flashImageModel) {
@@ -232,7 +282,7 @@ export const getModelCapabilities = (modelId: string) => {
     if (isGemini31FlashImageModel(modelId)) {
         supportedImageSizes = ['512', '1K', '2K', '4K'];
     } else if (openAiImageModel) {
-        supportedImageSizes = ['1K', '2K', '4K'];
+        supportedImageSizes = ['1K', 'Auto'];
     } else if (gemini3ImageModel) {
         supportedImageSizes = ['1K', '2K', '4K'];
     } else if (realImagenModel && !modelId.toLowerCase().includes('fast')) {
@@ -248,6 +298,8 @@ export const getModelCapabilities = (modelId: string) => {
         isRealImagenModel: realImagenModel,
         isOpenAiImageModel: openAiImageModel,
         isOpenAiCompatibleChatModel: openAiCompatibleChatModel,
+        isOpenAiReasoningEffortModel: openAiReasoningEffortModel,
+        isMiniMaxOpenAiReasoningSplitModel: miniMaxOpenAiReasoningSplitModel,
         isAnthropicCompatibleChatModel: anthropicCompatibleChatModel,
         isImagenModel: imageModel,
         isStandaloneImageGenerationModel: standaloneImageGenerationModel,

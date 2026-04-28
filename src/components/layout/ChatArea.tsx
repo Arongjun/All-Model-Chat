@@ -15,47 +15,26 @@ import { useUIStore } from '../../stores/uiStore';
 import { useIsMobile } from '../../hooks/useDevice';
 import { useWindowContext } from '../../contexts/WindowContext';
 
-const SWIPE_FOCUS_MIN_DISTANCE_PX = 60;
-type NavigatorWithVirtualKeyboard = Navigator & {
-  virtualKeyboard?: {
-    show?: () => void;
-  };
+const MOBILE_SCROLL_BLUR_DISTANCE_PX = 12;
+const composerFocusPreservingSelector =
+  '[data-chat-input-root="true"], button, a, input, textarea, select, label, summary, [role="button"], [role="link"], [contenteditable="true"]';
+
+const isEventTargetElement = (target: EventTarget | null, ownerDocument: Document): target is Element => {
+  const ElementClass = ownerDocument.defaultView?.Element ?? Element;
+  return target instanceof ElementClass;
 };
 
-const shouldIgnoreSwipeFocusTarget = (target: EventTarget | null) => {
-  if (!(target instanceof Element)) {
+const shouldPreserveComposerFocusTarget = (target: EventTarget | null, ownerDocument: Document) => {
+  if (!isEventTargetElement(target, ownerDocument)) {
     return false;
   }
 
-  return Boolean(
-    target.closest(
-      'header, button, a, input, textarea, select, label, summary, [role="button"], [role="link"], [contenteditable="true"]',
-    ),
-  );
+  return Boolean(target.closest(composerFocusPreservingSelector));
 };
 
-const activateComposerInput = (
-  composer: HTMLTextAreaElement,
-  navigatorObject?: Navigator,
-) => {
-  if (composer.disabled || composer.readOnly) {
-    return;
-  }
-
-  composer.focus();
-
-  try {
-    const textLength = composer.value.length;
-    composer.setSelectionRange(textLength, textLength);
-  } catch {
-    // Some environments can focus textareas without supporting selection updates.
-  }
-
-  try {
-    (navigatorObject as NavigatorWithVirtualKeyboard | undefined)?.virtualKeyboard?.show?.();
-  } catch {
-    // Ignore virtual keyboard API failures on unsupported browsers.
-  }
+const isComposerTextArea = (element: Element | null, ownerDocument: Document): element is HTMLTextAreaElement => {
+  const TextAreaClass = ownerDocument.defaultView?.HTMLTextAreaElement ?? HTMLTextAreaElement;
+  return element instanceof TextAreaClass && element.getAttribute('aria-label') === 'Chat message input';
 };
 
 export type { ChatAreaProps };
@@ -94,73 +73,56 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ chatArea }) => {
   const setPersonGeneration = useChatStore(s => s.setPersonGeneration);
   const isMobile = useIsMobile();
   const { document: targetDocument } = useWindowContext();
-  const swipeStartRef = useRef<{ x: number; y: number; canFocus: boolean } | null>(null);
+  const scrollStartRef = useRef<{ y: number; canBlurComposer: boolean } | null>(null);
 
   const { chatInputHeight, chatInputContainerRef, isImagenModel, handleQuote, handleInsert } = useChatArea({
     currentChatSettings: session.currentChatSettings,
   });
 
-  const focusComposerInput = useCallback(() => {
-    const composer = targetDocument.querySelector('textarea[aria-label="Chat message input"]');
-
-    if (!(composer instanceof HTMLTextAreaElement) || composer.disabled) {
-      return;
+  const blurComposerInput = useCallback(() => {
+    const activeElement = targetDocument.activeElement;
+    if (isComposerTextArea(activeElement, targetDocument)) {
+      activeElement.blur();
     }
-
-    activateComposerInput(composer, targetDocument.defaultView?.navigator);
   }, [targetDocument]);
 
   const handleTouchStart = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
       if (!isMobile || event.touches.length !== 1) {
-        swipeStartRef.current = null;
+        scrollStartRef.current = null;
         return;
       }
 
       const touch = event.touches[0];
-      swipeStartRef.current = {
-        x: touch.clientX,
+      scrollStartRef.current = {
         y: touch.clientY,
-        canFocus: !shouldIgnoreSwipeFocusTarget(event.target),
+        canBlurComposer: !shouldPreserveComposerFocusTarget(event.target, targetDocument),
       };
     },
-    [isMobile],
+    [isMobile, targetDocument],
   );
 
-  const resetSwipeFocusGesture = useCallback(() => {
-    swipeStartRef.current = null;
-  }, []);
-
-  const handleTouchEnd = useCallback(
+  const handleTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
-      if (!isMobile || event.changedTouches.length !== 1) {
-        swipeStartRef.current = null;
+      const scrollStart = scrollStartRef.current;
+      if (!isMobile || !scrollStart?.canBlurComposer || event.touches.length !== 1) {
         return;
       }
 
-      const swipeStart = swipeStartRef.current;
-      swipeStartRef.current = null;
-
-      if (!swipeStart?.canFocus) {
+      const deltaY = event.touches[0].clientY - scrollStart.y;
+      if (Math.abs(deltaY) < MOBILE_SCROLL_BLUR_DISTANCE_PX) {
         return;
       }
 
-      const touch = event.changedTouches[0];
-      const deltaX = touch.clientX - swipeStart.x;
-      const deltaY = touch.clientY - swipeStart.y;
-
-      if (deltaY < SWIPE_FOCUS_MIN_DISTANCE_PX) {
-        return;
-      }
-
-      if (Math.abs(deltaY) <= Math.abs(deltaX)) {
-        return;
-      }
-
-      focusComposerInput();
+      blurComposerInput();
+      scrollStartRef.current = null;
     },
-    [focusComposerInput, isMobile],
+    [blurComposerInput, isMobile],
   );
+
+  const resetComposerScrollGesture = useCallback(() => {
+    scrollStartRef.current = null;
+  }, []);
 
   const newChatShortcut = useMemo(() => getShortcutDisplay('general.newChat', appSettings), [appSettings]);
   const pipShortcut = useMemo(() => getShortcutDisplay('general.togglePip', appSettings), [appSettings]);
@@ -342,8 +304,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ chatArea }) => {
       onDragLeave={shell.handleAppDragLeave}
       onDrop={shell.handleAppDrop}
       onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={resetSwipeFocusGesture}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={resetComposerScrollGesture}
+      onTouchCancel={resetComposerScrollGesture}
     >
       <DragDropOverlay isDraggingOver={shell.isAppDraggingOver} />
 
@@ -378,7 +341,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ chatArea }) => {
       <ChatAreaProvider value={providerValue}>
         <MessageList />
 
-        <div ref={chatInputContainerRef} className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
+        <div
+          ref={chatInputContainerRef}
+          className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none"
+          data-chat-input-root="true"
+        >
           <div className="pointer-events-auto">
             <ChatInput />
           </div>

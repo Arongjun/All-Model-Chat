@@ -203,11 +203,14 @@ export default defineConfig(({ mode }) => {
         filename: 'sw.ts',
         injectRegister: false,
         manifest: false,
-        includeAssets: ['pwa-192.png', 'pwa-512.png', 'pwa-512-maskable.png'],
+        includeAssets: [],
         injectManifest: {
           globPatterns: ['**/*.{js,css,html,png,svg,mjs,json,woff,woff2,ttf}'],
           globIgnores: [
             '**/runtime-config.js',
+            '**/favicon.png',
+            '**/apple-touch-icon.png',
+            '**/pwa-*.png',
             '**/pyodide/**',
             '**/assets/pyodide-runtime-*.js',
             '**/assets/pdfjs-vendor-*.js',

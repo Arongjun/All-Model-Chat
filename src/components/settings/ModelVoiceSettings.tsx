@@ -38,6 +38,9 @@ interface ModelVoiceSettingsProps {
   topK: number;
   setTopK: (value: number) => void;
   setAvailableModels: (models: ModelOption[]) => void;
+  onRefreshModels?: () => void | Promise<void>;
+  isRefreshingModels?: boolean;
+  modelsRefreshError?: string | null;
   mediaResolution?: MediaResolution;
   setMediaResolution?: (resolution: MediaResolution) => void;
 }
@@ -56,6 +59,9 @@ export const ModelVoiceSettings: React.FC<ModelVoiceSettingsProps> = (props) => 
     topK, setTopK,
     t,
     setAvailableModels,
+    onRefreshModels,
+    isRefreshingModels,
+    modelsRefreshError,
     mediaResolution,
     setMediaResolution
   } = props;
@@ -140,6 +146,9 @@ export const ModelVoiceSettings: React.FC<ModelVoiceSettingsProps> = (props) => 
               selectedModelId={modelId}
               onSelectModel={handleModelIdChange}
               setAvailableModels={setAvailableModels}
+              onRefreshModels={onRefreshModels}
+              isRefreshingModels={isRefreshingModels}
+              modelsRefreshError={modelsRefreshError}
             />
           </div>
 

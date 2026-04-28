@@ -72,7 +72,16 @@ export const useChat = (appSettings: AppSettings, setAppSettings: React.Dispatch
 
     const sessionKeyMapRef = useRef<Map<string, string>>(new Map());
 
-    const { apiModels: apiModelsFromHook, isModelsLoading, modelsLoadingError, setApiModels } = useModels();
+    const {
+        apiModels: apiModelsFromHook,
+        isModelsLoading,
+        modelsLoadingError,
+        setApiModels,
+        refreshModelsFromApi,
+        isModelsRefreshing,
+        modelsRefreshError,
+        lastModelRefreshAt,
+    } = useModels();
 
     const effectiveApiModels = apiModelsFromHook;
 
@@ -240,6 +249,10 @@ export const useChat = (appSettings: AppSettings, setAppSettings: React.Dispatch
         setApiModels,
         isModelsLoading,
         modelsLoadingError,
+        refreshModelsFromApi,
+        isModelsRefreshing,
+        modelsRefreshError,
+        lastModelRefreshAt,
         isSwitchingModel,
         aspectRatio,
         imageSize,

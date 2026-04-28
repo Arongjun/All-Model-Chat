@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BadgeDollarSign,
   Building2,
+  Cloud,
   FileDown,
   KeyRound,
   RefreshCcw,
@@ -17,17 +18,22 @@ import type {
   WorkspaceAdminStateResponse,
   WorkspaceDashboardResponse,
   WorkspaceSessionResponse,
+  WorkspaceObjectStorageSettingsResponse,
   WorkspaceUsagePageResponse,
   WorkspaceUserSummary,
 } from '../../../types';
 import { SETTINGS_INPUT_CLASS } from '../../../constants/appConstants';
+import { requestModelDiscoveryRefresh } from '../../../services/modelDiscovery';
 import { workspaceApi } from '../../../services/workspaceApi';
+import { CloudGovernancePanel } from './workspace/CloudGovernancePanel';
+import { SystemScenariosAdminPanel } from './workspace/SystemScenariosAdminPanel';
 
 type WorkspaceState = {
   session: WorkspaceSessionResponse | null;
   dashboard: WorkspaceDashboardResponse | null;
   adminState: WorkspaceAdminStateResponse | null;
   diagnostics: WorkspaceAdminDiagnosticsResponse | null;
+  objectStorage: WorkspaceObjectStorageSettingsResponse | null;
 };
 
 type PolicyDraft = {
@@ -79,6 +85,19 @@ type ApiSettingsForm = Record<'gemini' | 'openai' | 'anthropic', {
   apiBase: string;
   clearApiKey: boolean;
 }>;
+
+type ObjectStorageForm = {
+  enabled: boolean;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  clearSecretAccessKey: boolean;
+  forcePathStyle: boolean;
+  publicBaseUrl: string;
+  prefix: string;
+};
 
 const inputClassName = `w-full rounded-xl border px-3 py-2.5 text-sm transition-colors ${SETTINGS_INPUT_CLASS}`;
 const textareaClassName = `${inputClassName} min-h-24 resize-y`;
@@ -238,8 +257,24 @@ function createEmptyApiSettingsForm(): ApiSettingsForm {
   };
 }
 
+function createEmptyObjectStorageForm(): ObjectStorageForm {
+  return {
+    enabled: false,
+    endpoint: '',
+    region: 'auto',
+    bucket: '',
+    accessKeyId: '',
+    secretAccessKey: '',
+    clearSecretAccessKey: false,
+    forcePathStyle: true,
+    publicBaseUrl: '',
+    prefix: 'arong-ai-workstation/cloud-chat',
+  };
+}
+
 function formatApiConfigSource(value: string): string {
   switch (value) {
+    case 'admin':
     case 'workspace':
       return '后台配置';
     case 'environment':
@@ -281,6 +316,7 @@ function emptyWorkspaceState(): WorkspaceState {
     dashboard: null,
     adminState: null,
     diagnostics: null,
+    objectStorage: null,
   };
 }
 
@@ -377,6 +413,7 @@ export const WorkspaceSection: React.FC = () => {
   });
   const usageFiltersRef = useRef(usageFilters);
   const [apiSettingsForm, setApiSettingsForm] = useState<ApiSettingsForm>(createEmptyApiSettingsForm);
+  const [objectStorageForm, setObjectStorageForm] = useState<ObjectStorageForm>(createEmptyObjectStorageForm);
   const [policyDrafts, setPolicyDrafts] = useState<PolicyDraft[]>([]);
   const [userDrafts, setUserDrafts] = useState<Record<string, UserDraft>>({});
 
@@ -396,15 +433,17 @@ export const WorkspaceSection: React.FC = () => {
           dashboard: null,
           adminState: null,
           diagnostics: null,
+          objectStorage: null,
         });
         return;
       }
 
       if (session.currentUser.role === 'admin') {
-        const [adminState, nextUsagePage, diagnostics] = await Promise.all([
+        const [adminState, nextUsagePage, diagnostics, objectStorage] = await Promise.all([
           workspaceApi.getAdminState(),
           workspaceApi.getAdminUsage(usageFiltersRef.current),
           workspaceApi.getAdminDiagnostics(),
+          workspaceApi.getObjectStorageSettings(),
         ]);
         setUsagePage(nextUsagePage);
         setState({
@@ -412,6 +451,7 @@ export const WorkspaceSection: React.FC = () => {
           dashboard: adminState,
           adminState,
           diagnostics,
+          objectStorage,
         });
         return;
       }
@@ -423,6 +463,7 @@ export const WorkspaceSection: React.FC = () => {
         dashboard,
         adminState: null,
         diagnostics: null,
+        objectStorage: null,
       });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '加载工作站信息失败。');
@@ -465,6 +506,26 @@ export const WorkspaceSection: React.FC = () => {
       return next;
     });
   }, [state.diagnostics?.server.apiSettings]);
+
+  useEffect(() => {
+    const objectStorage = state.objectStorage;
+    if (!objectStorage) {
+      return;
+    }
+
+    setObjectStorageForm({
+      enabled: objectStorage.enabled,
+      endpoint: objectStorage.endpoint,
+      region: objectStorage.region || 'auto',
+      bucket: objectStorage.bucket,
+      accessKeyId: objectStorage.accessKeyId,
+      secretAccessKey: '',
+      clearSecretAccessKey: false,
+      forcePathStyle: objectStorage.forcePathStyle,
+      publicBaseUrl: objectStorage.publicBaseUrl ?? '',
+      prefix: objectStorage.prefix || 'arong-ai-workstation/cloud-chat',
+    });
+  }, [state.objectStorage]);
 
   useEffect(() => {
     const users = state.adminState?.users ?? [];
@@ -633,7 +694,7 @@ export const WorkspaceSection: React.FC = () => {
       <div className="flex min-h-64 items-center justify-center rounded-3xl border border-[var(--theme-border-primary)] bg-[var(--theme-bg-secondary)]">
         <div className="flex items-center gap-3 text-sm text-[var(--theme-text-secondary)]">
           <RefreshCcw size={16} className="animate-spin" />
-          正在加载工作站配置...
+          正在加载账号与额度配置...
         </div>
       </div>
     );
@@ -646,23 +707,23 @@ export const WorkspaceSection: React.FC = () => {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-[var(--theme-bg-tertiary)] px-3 py-1 text-xs font-medium text-[var(--theme-text-link)]">
               <Building2 size={14} />
-              多用户工作站底座
+              多用户账号与配额中心
             </div>
-            <h2 className="mt-3 text-2xl font-semibold text-[var(--theme-text-primary)]">{workspaceName}</h2>
+            <h2 className="mt-3 text-2xl font-semibold text-[var(--theme-text-primary)]">账号与额度管理</h2>
             <p className="mt-2 max-w-2xl text-sm leading-7 text-[var(--theme-text-secondary)]">
-              这一层负责账号、登录态、积分、模型次数包、兑换码和后台管理。聊天能力还是原来的体验，但真正的额度控制已经收回到服务端。
+              这里管理 {workspaceName} 的账号登录、邀请码注册、积分、模型次数包、兑换码和运营后台。聊天体验保持简洁，额度校验统一由服务端完成。
             </p>
           </div>
           <button
             type="button"
-            className={secondaryButtonClassName}
+            className={`${secondaryButtonClassName} min-w-[7.5rem] shrink-0 whitespace-nowrap`}
             onClick={() => {
               void runAction('refresh', loadWorkspaceState);
             }}
             disabled={busyAction !== null}
           >
-            <RefreshCcw size={16} className={busyAction === 'refresh' ? 'animate-spin' : ''} />
-            刷新状态
+            <RefreshCcw size={16} className={`shrink-0 ${busyAction === 'refresh' ? 'animate-spin' : ''}`} />
+            <span className="whitespace-nowrap">刷新状态</span>
           </button>
         </div>
       </div>
@@ -713,6 +774,7 @@ export const WorkspaceSection: React.FC = () => {
                   await workspaceApi.bootstrapAdmin(bootstrapForm);
                   setBootstrapForm({ name: '', email: '', password: '' });
                   await loadWorkspaceState();
+                  requestModelDiscoveryRefresh();
                 });
               }}
             >
@@ -724,7 +786,7 @@ export const WorkspaceSection: React.FC = () => {
         <>
           <SectionCard
           icon={ShieldCheck}
-          title="登录工作站"
+          title="登录账号"
           description="管理员和成员都通过服务端账号登录。登录后，Gemini、OpenAI-compatible、Anthropic-compatible 与生图请求都会自动带上工作站配额校验。"
         >
           <div className="grid gap-4 md:grid-cols-2">
@@ -755,6 +817,7 @@ export const WorkspaceSection: React.FC = () => {
                   await workspaceApi.login(loginForm);
                   setLoginForm({ email: '', password: '' });
                   await loadWorkspaceState();
+                  requestModelDiscoveryRefresh();
                 });
               }}
             >
@@ -808,6 +871,7 @@ export const WorkspaceSection: React.FC = () => {
                     await workspaceApi.registerWithInvite(registerForm);
                     setRegisterForm({ name: '', email: '', password: '', inviteCode: '' });
                     await loadWorkspaceState();
+                    requestModelDiscoveryRefresh();
                   });
                 }}
               >
@@ -829,7 +893,7 @@ export const WorkspaceSection: React.FC = () => {
             <SectionCard
               icon={TicketPercent}
               title="次数包余额"
-              description="更适合图像模型。比如你可以单独给某个用户发 20 次 gpt-image 或 imagen 出图额度。"
+              description="更适合图像模型。比如你可以单独给某个用户发 20 次 gpt-image-2 或 imagen 出图额度。"
             >
               <div className="text-3xl font-semibold text-[var(--theme-text-primary)]">{allowanceCount}</div>
             </SectionCard>
@@ -1112,6 +1176,15 @@ export const WorkspaceSection: React.FC = () => {
                             清空后台密钥
                           </label>
                         </div>
+                        {providerSetting.provider === 'openai' && (
+                          <p className="mt-3 rounded-xl bg-[var(--theme-bg-tertiary)]/60 px-3 py-2 text-xs leading-relaxed text-[var(--theme-text-secondary)]">
+                            可填 OpenAI 官方、OpenRouter、MiniMax、小米 MiMo 或自建 Codex 中转站。只要上游兼容
+                            <code className="mx-1 rounded bg-[var(--theme-bg-primary)] px-1">/v1/chat/completions</code>
+                            和
+                            <code className="mx-1 rounded bg-[var(--theme-bg-primary)] px-1">/v1/models</code>
+                            ，模型列表就会自动同步；GPT 生图仍只启用 gpt-image-1、gpt-image-1.5、gpt-image-2，并只显示官方 Auto 与 1K 尺寸档。
+                          </p>
+                        )}
                       </div>
                     );
                   })}
@@ -1131,6 +1204,7 @@ export const WorkspaceSection: React.FC = () => {
                         await workspaceApi.importAdminApiSettingsFromEnvironment();
                         const nextDiagnostics = await workspaceApi.getAdminDiagnostics();
                         setState((prev) => ({ ...prev, diagnostics: nextDiagnostics }));
+                        requestModelDiscoveryRefresh();
                       });
                     }}
                   >
@@ -1163,6 +1237,7 @@ export const WorkspaceSection: React.FC = () => {
                         ) as ApiSettingsForm);
                         const nextDiagnostics = await workspaceApi.getAdminDiagnostics();
                         setState((prev) => ({ ...prev, diagnostics: nextDiagnostics }));
+                        requestModelDiscoveryRefresh();
                       });
                     }}
                   >
@@ -1170,6 +1245,147 @@ export const WorkspaceSection: React.FC = () => {
                   </button>
                 </div>
               </SectionCard>
+
+              <SectionCard
+                icon={Cloud}
+                title="云端聊天与对象存储"
+                description="登录后的聊天记录会同步到服务器 SQLite；图片和文件会写入 S3 兼容对象存储，适合 1Panel 部署时接 MinIO、R2 或其它 S3 网关。"
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="flex items-center gap-3 rounded-2xl border border-[var(--theme-border-primary)] bg-[var(--theme-bg-primary)] px-4 py-3 text-sm text-[var(--theme-text-primary)]">
+                    <input
+                      type="checkbox"
+                      checked={objectStorageForm.enabled}
+                      onChange={(event) =>
+                        setObjectStorageForm((prev) => ({ ...prev, enabled: event.target.checked }))
+                      }
+                    />
+                    启用对象存储附件同步
+                  </label>
+                  <label className="flex items-center gap-3 rounded-2xl border border-[var(--theme-border-primary)] bg-[var(--theme-bg-primary)] px-4 py-3 text-sm text-[var(--theme-text-primary)]">
+                    <input
+                      type="checkbox"
+                      checked={objectStorageForm.forcePathStyle}
+                      onChange={(event) =>
+                        setObjectStorageForm((prev) => ({ ...prev, forcePathStyle: event.target.checked }))
+                      }
+                    />
+                    使用路径风格地址（MinIO/多数自建存储推荐）
+                  </label>
+                  <input
+                    className={inputClassName}
+                    placeholder="Endpoint，例如 http://minio:9000 或 https://xxx.r2.cloudflarestorage.com"
+                    value={objectStorageForm.endpoint}
+                    onChange={(event) => setObjectStorageForm((prev) => ({ ...prev, endpoint: event.target.value }))}
+                  />
+                  <input
+                    className={inputClassName}
+                    placeholder="Bucket"
+                    value={objectStorageForm.bucket}
+                    onChange={(event) => setObjectStorageForm((prev) => ({ ...prev, bucket: event.target.value }))}
+                  />
+                  <input
+                    className={inputClassName}
+                    placeholder="Region，例如 auto、us-east-1"
+                    value={objectStorageForm.region}
+                    onChange={(event) => setObjectStorageForm((prev) => ({ ...prev, region: event.target.value }))}
+                  />
+                  <input
+                    className={inputClassName}
+                    placeholder="Access Key ID"
+                    value={objectStorageForm.accessKeyId}
+                    onChange={(event) => setObjectStorageForm((prev) => ({ ...prev, accessKeyId: event.target.value }))}
+                  />
+                  <input
+                    className={inputClassName}
+                    type="password"
+                    placeholder={state.objectStorage?.secretKeyConfigured ? '留空则保持当前 Secret Key' : 'Secret Access Key'}
+                    value={objectStorageForm.secretAccessKey}
+                    onChange={(event) =>
+                      setObjectStorageForm((prev) => ({
+                        ...prev,
+                        secretAccessKey: event.target.value,
+                        clearSecretAccessKey: false,
+                      }))
+                    }
+                  />
+                  <input
+                    className={inputClassName}
+                    placeholder="对象前缀，例如 arong-ai-workstation/cloud-chat"
+                    value={objectStorageForm.prefix}
+                    onChange={(event) => setObjectStorageForm((prev) => ({ ...prev, prefix: event.target.value }))}
+                  />
+                  <input
+                    className={`${inputClassName} md:col-span-2`}
+                    placeholder="可选 CDN 前缀（预留；当前仍走服务端鉴权下载）"
+                    value={objectStorageForm.publicBaseUrl}
+                    onChange={(event) =>
+                      setObjectStorageForm((prev) => ({ ...prev, publicBaseUrl: event.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-[var(--theme-border-primary)] bg-[var(--theme-bg-primary)] px-4 py-3 text-sm leading-6 text-[var(--theme-text-secondary)]">
+                  当前状态：
+                  {state.objectStorage?.configured ? '已可用' : '未完整配置'}；
+                  来源：{formatApiConfigSource(state.objectStorage?.source ?? 'none')}；
+                  Access Key：{state.objectStorage?.accessKeyPreview ?? '未配置'}；
+                  Secret：{state.objectStorage?.secretKeyPreview ?? '未配置'}。
+                  云端聊天的文本记录不依赖对象存储；但跨设备查看图片/文件必须配置这里。
+                </div>
+
+                <div className="mt-4 flex flex-wrap justify-end gap-3">
+                  <label className="inline-flex items-center gap-2 text-sm text-[var(--theme-text-secondary)]">
+                    <input
+                      type="checkbox"
+                      checked={objectStorageForm.clearSecretAccessKey}
+                      onChange={(event) =>
+                        setObjectStorageForm((prev) => ({
+                          ...prev,
+                          secretAccessKey: '',
+                          clearSecretAccessKey: event.target.checked,
+                        }))
+                      }
+                    />
+                    清空后台 Secret Key
+                  </label>
+                  <button
+                    type="button"
+                    className={primaryButtonClassName}
+                    disabled={busyAction !== null}
+                    onClick={() => {
+                      void runAction('save-object-storage', async () => {
+                        const nextObjectStorage = await workspaceApi.updateObjectStorageSettings({
+                          enabled: objectStorageForm.enabled,
+                          endpoint: objectStorageForm.endpoint,
+                          region: objectStorageForm.region,
+                          bucket: objectStorageForm.bucket,
+                          accessKeyId: objectStorageForm.accessKeyId,
+                          ...(objectStorageForm.secretAccessKey.trim()
+                            ? { secretAccessKey: objectStorageForm.secretAccessKey }
+                            : {}),
+                          clearSecretAccessKey: objectStorageForm.clearSecretAccessKey,
+                          forcePathStyle: objectStorageForm.forcePathStyle,
+                          publicBaseUrl: objectStorageForm.publicBaseUrl || null,
+                          prefix: objectStorageForm.prefix,
+                        });
+                        setState((prev) => ({ ...prev, objectStorage: nextObjectStorage }));
+                        setObjectStorageForm((prev) => ({
+                          ...prev,
+                          secretAccessKey: '',
+                          clearSecretAccessKey: false,
+                        }));
+                      });
+                    }}
+                  >
+                    保存对象存储配置
+                  </button>
+                </div>
+              </SectionCard>
+
+              <CloudGovernancePanel users={state.adminState?.users ?? []} />
+
+              <SystemScenariosAdminPanel users={state.adminState?.users ?? []} />
 
               <SectionCard
                 icon={TicketPercent}
@@ -1211,7 +1427,7 @@ export const WorkspaceSection: React.FC = () => {
                   />
                   <textarea
                     className={textareaClassName}
-                    placeholder={'注册送次数包，按行填写\nimagen-4.0-*=10\ngpt-image-*=5'}
+                    placeholder={'注册送次数包，按行填写\nimagen-4.0-*=10\ngpt-image-2=5'}
                     value={inviteForm.allowancesText}
                     onChange={(event) =>
                       setInviteForm((prev) => ({ ...prev, allowancesText: event.target.value }))
@@ -1305,7 +1521,7 @@ export const WorkspaceSection: React.FC = () => {
               <SectionCard
                 icon={Users}
                 title="用户管理"
-                description="管理员可以给每个成员发独立积分，或者直接发某个模型的次数包，比如 `gpt-image-*` 或 `imagen-4.0-*`。"
+                description="管理员可以给每个成员发独立积分，或者直接发某个模型的次数包，比如 `gpt-image-2` 或 `imagen-4.0-*`。"
               >
                 <div className="grid gap-4 md:grid-cols-3">
                   <input
@@ -1345,7 +1561,7 @@ export const WorkspaceSection: React.FC = () => {
                   />
                   <textarea
                     className={textareaClassName}
-                    placeholder={'次数包，按行填写\nimagen-4.0-*=10\ngpt-image-*=5'}
+                    placeholder={'次数包，按行填写\nimagen-4.0-*=10\ngpt-image-2=5'}
                     value={createUserForm.allowancesText}
                     onChange={(event) =>
                       setCreateUserForm((prev) => ({ ...prev, allowancesText: event.target.value }))
@@ -1564,7 +1780,7 @@ export const WorkspaceSection: React.FC = () => {
                   />
                   <textarea
                     className={`${textareaClassName} md:col-span-3`}
-                    placeholder={'模型次数包，可选\nimagen-4.0-*=10\ngpt-image-*=5'}
+                    placeholder={'模型次数包，可选\nimagen-4.0-*=10\ngpt-image-2=5'}
                     value={rechargeOrderForm.allowancesText}
                     onChange={(event) =>
                       setRechargeOrderForm((prev) => ({ ...prev, allowancesText: event.target.value }))
@@ -1653,7 +1869,7 @@ export const WorkspaceSection: React.FC = () => {
                   />
                   <textarea
                     className={`${textareaClassName} md:col-span-3`}
-                    placeholder={'次数包变化，支持正负数\nimagen-4.0-*=10\ngpt-image-*=-2'}
+                    placeholder={'次数包变化，支持正负数\nimagen-4.0-*=10\ngpt-image-2=-2'}
                     value={adjustmentForm.allowanceDeltasText}
                     onChange={(event) =>
                       setAdjustmentForm((prev) => ({ ...prev, allowanceDeltasText: event.target.value }))
@@ -1825,7 +2041,7 @@ export const WorkspaceSection: React.FC = () => {
                   />
                   <textarea
                     className={textareaClassName}
-                    placeholder={'附带次数包，按行填写\nimagen-4.0-*=10\ngpt-image-*=5'}
+                    placeholder={'附带次数包，按行填写\nimagen-4.0-*=10\ngpt-image-2=5'}
                     value={redeemForm.allowancesText}
                     onChange={(event) =>
                       setRedeemForm((prev) => ({ ...prev, allowancesText: event.target.value }))

@@ -10,6 +10,7 @@ import {
   getExportableUserScenarios,
   initializeScenarioState,
 } from '../features/scenarios/scenarioLibrary';
+import { workspaceApi } from '../services/workspaceApi';
 
 type SessionsUpdater = (
   updater: (prev: SavedChatSession[]) => SavedChatSession[],
@@ -30,7 +31,8 @@ export const usePreloadedScenarios = ({
   setActiveSessionId,
 }: PreloadedScenariosProps) => {
   const [userSavedScenarios, setUserSavedScenarios] = useState<SavedScenario[]>([]);
-  const savedScenarios = buildSavedScenarios(userSavedScenarios);
+  const [systemScenarios, setSystemScenarios] = useState<SavedScenario[] | null>(null);
+  const savedScenarios = buildSavedScenarios(userSavedScenarios, systemScenarios ?? undefined);
 
   useEffect(() => {
     const loadScenarios = async () => {
@@ -49,6 +51,23 @@ export const usePreloadedScenarios = ({
       }
     };
     loadScenarios();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    workspaceApi.getVisibleSystemScenarios()
+      .then((response) => {
+        if (!cancelled) {
+          setSystemScenarios(response.scenarios);
+        }
+      })
+      .catch((error) => {
+        logService.warn('Server managed scenarios are not available; using bundled presets.', { error });
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSaveAllScenarios = (updatedScenarios: SavedScenario[]) => {

@@ -4,6 +4,7 @@ import { dbService } from '../../../utils/db';
 import { logService } from '../../../services/logService';
 import { cleanupFilePreviewUrls } from '../../../utils/fileHelpers';
 import { removeSessionScopedLocalStorageEntries } from '../../../utils/sessionLocalStorage';
+import { deleteSessionFromLocalAndCloud, saveGroupsToLocalAndCloud } from '../../../services/chatSessionPersistence';
 
 interface UseHistoryClearerProps {
     savedSessions: SavedChatSession[];
@@ -26,7 +27,12 @@ export const useHistoryClearer = ({
         activeJobs.current.forEach(controller => controller.abort());
         activeJobs.current.clear();
 
-        await Promise.all([dbService.setAllSessions([]), dbService.setAllGroups([]), dbService.setActiveSessionId(null)]);
+        await Promise.all([
+            dbService.setAllSessions([]),
+            ...savedSessions.map((session) => deleteSessionFromLocalAndCloud(session.id)),
+            saveGroupsToLocalAndCloud([]),
+            dbService.setActiveSessionId(null),
+        ]);
 
         // Cleanup all blobs only after persistence succeeds so a failed clear
         // does not leave the still-visible UI with revoked previews.

@@ -42,6 +42,7 @@ describe('useModels', () => {
         storage.clear();
       },
     });
+    vi.stubGlobal('fetch', undefined);
   });
 
   it('keeps legacy Gemini 2.5 Flash preview models in persisted custom lists', () => {

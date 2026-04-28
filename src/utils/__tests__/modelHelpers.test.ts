@@ -5,7 +5,10 @@ import {
   getModelCapabilities,
   getDefaultThinkingLevelForModel,
   isAnthropicCompatibleChatModel,
+  isOpenAiImageModel,
   isOpenAiCompatibleChatModel,
+  isOpenAiReasoningEffortModel,
+  isMiniMaxOpenAiReasoningSplitModel,
   shouldStripThinkingFromContext,
   sanitizeModelOptions,
   resolveSupportedModelId,
@@ -162,6 +165,23 @@ describe('getModelCapabilities', () => {
     expect(isOpenAiCompatibleChatModel('claude-3-5-sonnet-latest')).toBe(false);
   });
 
+  it('only recognizes the provided GPT image models as OpenAI image models', () => {
+    expect(isOpenAiImageModel('gpt-image-1')).toBe(true);
+    expect(isOpenAiImageModel('gpt-image-1.5')).toBe(true);
+    expect(isOpenAiImageModel('gpt-image-2')).toBe(true);
+    expect(isOpenAiImageModel('openai:gpt-image-2')).toBe(true);
+    expect(isOpenAiImageModel('gpt-image-1-mini')).toBe(false);
+    expect(isOpenAiImageModel('dall-e-3')).toBe(false);
+    expect(isOpenAiImageModel('chatgpt-image-latest')).toBe(false);
+  });
+
+  it('limits GPT image models to official OpenAI image sizes and ratios', () => {
+    const capabilities = getModelCapabilities('gpt-image-2');
+
+    expect(capabilities.supportedImageSizes).toEqual(['1K', 'Auto']);
+    expect(capabilities.supportedAspectRatios).toEqual(['1:1', '3:2', '2:3']);
+  });
+
   it('classifies Claude models as Anthropic-compatible chat models', () => {
     expect(isAnthropicCompatibleChatModel('claude-3-5-sonnet-latest')).toBe(true);
     expect(isAnthropicCompatibleChatModel('anthropic:claude-3-5-sonnet-latest')).toBe(true);
@@ -174,6 +194,26 @@ describe('getModelCapabilities', () => {
     expect(capabilities.isGemini3).toBe(false);
     expect(capabilities.supportsThinkingLevel).toBe(false);
     expect(capabilities.isOpenAiCompatibleChatModel).toBe(true);
+  });
+
+  it('enables reasoning effort controls for OpenAI-compatible reasoning model ids', () => {
+    expect(isOpenAiReasoningEffortModel('openai:gpt-5.3-codex')).toBe(true);
+    expect(isOpenAiReasoningEffortModel('o3-mini')).toBe(true);
+    expect(getModelCapabilities('openai:gpt-5.3-codex').supportsThinkingLevel).toBe(true);
+  });
+
+  it('keeps namespaced gateway ids chat-capable without assuming provider-specific reasoning effort params', () => {
+    const capabilities = getModelCapabilities('openai:openai/gpt-5.3-codex');
+
+    expect(capabilities.isOpenAiCompatibleChatModel).toBe(true);
+    expect(capabilities.isOpenAiReasoningEffortModel).toBe(false);
+    expect(capabilities.supportsThinkingLevel).toBe(false);
+  });
+
+  it('recognizes MiniMax OpenAI-compatible reasoning split models without treating them as effort-controlled models', () => {
+    expect(isMiniMaxOpenAiReasoningSplitModel('openai:minimax-m2')).toBe(true);
+    expect(isOpenAiReasoningEffortModel('openai:minimax-m2')).toBe(false);
+    expect(getModelCapabilities('openai:minimax-m2').isMiniMaxOpenAiReasoningSplitModel).toBe(true);
   });
 });
 
@@ -232,6 +272,23 @@ describe('supported model sanitization', () => {
     expect(resolveSupportedModelId('gemini-2.5-pro-preview-tts', 'gemini-3.1-flash-tts-preview')).toBe(
       'gemini-2.5-pro-preview-tts',
     );
+  });
+
+  it('removes unsupported OpenAI image ids while keeping the three provided GPT image models', () => {
+    const models: ModelOption[] = [
+      { id: 'gpt-image-1', name: 'GPT Image 1' },
+      { id: 'gpt-image-1.5', name: 'GPT Image 1.5' },
+      { id: 'gpt-image-2', name: 'GPT Image 2' },
+      { id: 'gpt-image-1-mini', name: 'GPT Image Mini' },
+      { id: 'dall-e-3', name: 'DALL-E 3' },
+      { id: 'chatgpt-image-latest', name: 'ChatGPT Image' },
+    ];
+
+    expect(sanitizeModelOptions(models).map((model) => model.id)).toEqual([
+      'gpt-image-1',
+      'gpt-image-1.5',
+      'gpt-image-2',
+    ]);
   });
 });
 

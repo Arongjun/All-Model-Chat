@@ -1,9 +1,18 @@
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ModelOption } from '../../types';
 import { sanitizeModelOptions } from '../../utils/modelHelpers';
+import {
+    canDiscoverWorkspaceModels,
+    discoverAndMergeModels,
+    MODEL_DISCOVERY_REFRESH_EVENT,
+} from '../../services/modelDiscovery';
 
 const CUSTOM_MODELS_KEY = 'custom_model_list_v1';
+
+const persistModels = (models: ModelOption[]) => {
+    localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(models));
+};
 
 const parseStoredModels = (storedValue: string | null): ModelOption[] | null => {
     if (storedValue === null) {
@@ -28,6 +37,76 @@ export const useModels = () => {
     });
     const [isModelsLoading, setIsModelsLoading] = useState(() => apiModels.length === 0);
     const [modelsLoadingError, setModelsLoadingError] = useState<string | null>(null);
+    const [isModelsRefreshing, setIsModelsRefreshing] = useState(false);
+    const [modelsRefreshError, setModelsRefreshError] = useState<string | null>(null);
+    const [lastModelRefreshAt, setLastModelRefreshAt] = useState<string | null>(null);
+    const modelsRef = useRef(apiModels);
+    const isMountedRef = useRef(true);
+    const autoRefreshStartedRef = useRef(false);
+
+    useEffect(() => {
+        modelsRef.current = apiModels;
+    }, [apiModels]);
+
+    useEffect(() => {
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
+
+    const setApiModels = useCallback((models: ModelOption[]) => {
+        const sanitizedModels = sanitizeModelOptions(models);
+        modelsRef.current = sanitizedModels;
+        setApiModelsState(sanitizedModels);
+        setIsModelsLoading(false);
+        setModelsLoadingError(null);
+        setModelsRefreshError(null);
+        persistModels(sanitizedModels);
+    }, []);
+
+    const refreshModelsFromApi = useCallback(async (options: { silent?: boolean } = {}) => {
+        if (typeof fetch !== 'function') {
+            return;
+        }
+
+        if (isMountedRef.current) {
+            setIsModelsRefreshing(true);
+            if (!options.silent) {
+                setModelsRefreshError(null);
+            }
+        }
+
+        try {
+            if (!(await canDiscoverWorkspaceModels())) {
+                if (isMountedRef.current && !options.silent) {
+                    setModelsRefreshError('请先到「设置」→「账号与额度」登录后再同步 API 模型。');
+                }
+                return;
+            }
+
+            const { models } = await discoverAndMergeModels(modelsRef.current);
+            if (!isMountedRef.current) {
+                return;
+            }
+
+            modelsRef.current = models;
+            setApiModelsState(models);
+            setIsModelsLoading(false);
+            setModelsLoadingError(null);
+            setModelsRefreshError(null);
+            setLastModelRefreshAt(new Date().toISOString());
+            persistModels(models);
+        } catch (error) {
+            if (!isMountedRef.current || options.silent) {
+                return;
+            }
+            setModelsRefreshError(error instanceof Error ? error.message : 'Failed to sync API models.');
+        } finally {
+            if (isMountedRef.current) {
+                setIsModelsRefreshing(false);
+            }
+        }
+    }, []);
 
     useEffect(() => {
         if (apiModels.length > 0) {
@@ -40,7 +119,9 @@ export const useModels = () => {
         void import('../../utils/defaultModelOptions')
             .then(({ getDefaultModelOptions }) => {
                 if (!isActive) return;
-                setApiModelsState(getDefaultModelOptions());
+                const defaultModels = getDefaultModelOptions();
+                modelsRef.current = defaultModels;
+                setApiModelsState(defaultModels);
                 setIsModelsLoading(false);
             })
             .catch((error) => {
@@ -56,6 +137,24 @@ export const useModels = () => {
     }, [apiModels.length]);
 
     useEffect(() => {
+        if (autoRefreshStartedRef.current || isModelsLoading || modelsRef.current.length === 0) {
+            return;
+        }
+
+        autoRefreshStartedRef.current = true;
+        void refreshModelsFromApi({ silent: true });
+    }, [isModelsLoading, refreshModelsFromApi]);
+
+    useEffect(() => {
+        const handleModelDiscoveryRefresh = () => {
+            void refreshModelsFromApi();
+        };
+
+        window.addEventListener(MODEL_DISCOVERY_REFRESH_EVENT, handleModelDiscoveryRefresh);
+        return () => window.removeEventListener(MODEL_DISCOVERY_REFRESH_EVENT, handleModelDiscoveryRefresh);
+    }, [refreshModelsFromApi]);
+
+    useEffect(() => {
         const handleStorage = (event: StorageEvent) => {
             if (event.key !== CUSTOM_MODELS_KEY) {
                 return;
@@ -64,12 +163,14 @@ export const useModels = () => {
             try {
                 const storedModels = parseStoredModels(event.newValue);
                 if (storedModels) {
+                    modelsRef.current = storedModels;
                     setApiModelsState(storedModels);
                     setIsModelsLoading(false);
                     setModelsLoadingError(null);
                     return;
                 }
 
+                modelsRef.current = [];
                 setApiModelsState([]);
                 setIsModelsLoading(true);
                 setModelsLoadingError(null);
@@ -83,14 +184,15 @@ export const useModels = () => {
         window.addEventListener('storage', handleStorage);
         return () => window.removeEventListener('storage', handleStorage);
     }, []);
-    
-    const setApiModels = useCallback((models: ModelOption[]) => {
-        const sanitizedModels = sanitizeModelOptions(models);
-        setApiModelsState(sanitizedModels);
-        setIsModelsLoading(false);
-        setModelsLoadingError(null);
-        localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(sanitizedModels));
-    }, []);
 
-    return { apiModels, setApiModels, isModelsLoading, modelsLoadingError };
+    return {
+        apiModels,
+        setApiModels,
+        isModelsLoading,
+        modelsLoadingError,
+        refreshModelsFromApi,
+        isModelsRefreshing,
+        modelsRefreshError,
+        lastModelRefreshAt,
+    };
 };

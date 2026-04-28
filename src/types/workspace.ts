@@ -1,6 +1,7 @@
 export type WorkspaceRole = 'admin' | 'member';
 export type WorkspaceApiProvider = 'gemini' | 'openai' | 'anthropic';
 export type WorkspaceApiProviderConfigSource = 'workspace' | 'environment' | 'none';
+export type WorkspaceModelDiscoveryStatus = 'available' | 'not_configured' | 'error';
 
 export interface WorkspaceAdminApiProviderSetting {
   provider: WorkspaceApiProvider;
@@ -16,6 +17,114 @@ export interface WorkspaceAdminApiProviderSetting {
 
 export interface WorkspaceAdminApiSettingsResponse {
   providers: WorkspaceAdminApiProviderSetting[];
+}
+
+export interface WorkspaceObjectStorageSettingsResponse {
+  enabled: boolean;
+  configured: boolean;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  accessKeyPreview: string | null;
+  secretKeyConfigured: boolean;
+  secretKeyPreview: string | null;
+  forcePathStyle: boolean;
+  publicBaseUrl: string | null;
+  prefix: string;
+  source: 'admin' | 'environment' | 'none';
+}
+
+export interface WorkspaceCloudAdminSessionSummary {
+  id: string;
+  userId: string;
+  title: string;
+  timestamp: number;
+  messages: unknown[];
+  settings: Record<string, unknown>;
+  isPinned?: boolean;
+  groupId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  attachmentCount: number;
+  attachmentBytes: number;
+}
+
+export interface WorkspaceCloudAdminAttachmentSummary {
+  id: string;
+  userId: string;
+  fileId: string | null;
+  sessionId: string | null;
+  messageId: string | null;
+  name: string;
+  type: string;
+  size: number;
+  storageKey: string;
+  createdAt: string;
+  deletedAt: string | null;
+}
+
+export interface WorkspacePageResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface WorkspaceCloudRetentionSettings {
+  enabled: boolean;
+  maxAttachmentAgeDays: number;
+  maxTotalAttachmentBytes: number;
+  updatedAt: string | null;
+}
+
+export interface WorkspaceCloudCleanupResult {
+  dryRun: boolean;
+  matchedCount: number;
+  matchedBytes: number;
+  deletedCount: number;
+  deletedBytes: number;
+  skippedReason: string | null;
+}
+
+export interface WorkspaceSystemScenario {
+  id: string;
+  title: string;
+  systemInstruction?: string;
+  messages: Array<{ id: string; role: 'user' | 'model'; content: string }>;
+  managedBy: 'system';
+  visibilityMode: 'all' | 'members' | 'admins' | 'users';
+  allowedUserIds: string[];
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceDiscoveredModel {
+  id: string;
+  rawId: string;
+  name: string;
+  provider: WorkspaceApiProvider;
+  source: 'api';
+}
+
+export interface WorkspaceProviderModelDiscovery {
+  provider: WorkspaceApiProvider;
+  label: string;
+  apiBase: string;
+  apiKeySource: WorkspaceApiProviderConfigSource;
+  configured: boolean;
+  status: WorkspaceModelDiscoveryStatus;
+  models: WorkspaceDiscoveredModel[];
+  error?: string;
+}
+
+export interface WorkspaceModelDiscoveryResponse {
+  generatedAt: string;
+  models: WorkspaceDiscoveredModel[];
+  providers: WorkspaceProviderModelDiscovery[];
 }
 
 export interface WorkspaceUserSummary {

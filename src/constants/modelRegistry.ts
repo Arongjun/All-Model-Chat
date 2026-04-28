@@ -103,23 +103,18 @@ const MODEL_REGISTRY: RegisteredModel[] = [
     groups: ['image'],
   },
   {
-    id: 'gpt-image-2',
-    name: 'GPT Image 2',
+    id: 'gpt-image-1',
+    name: 'gpt-image-1',
     groups: ['image'],
   },
   {
     id: 'gpt-image-1.5',
-    name: 'GPT Image 1.5',
+    name: 'gpt-image-1.5',
     groups: ['image'],
   },
   {
-    id: 'gpt-image-1',
-    name: 'GPT Image 1',
-    groups: ['image'],
-  },
-  {
-    id: 'gpt-image-1-mini',
-    name: 'GPT Image 1 Mini',
+    id: 'gpt-image-2',
+    name: 'gpt-image-2',
     groups: ['image'],
   },
 ];

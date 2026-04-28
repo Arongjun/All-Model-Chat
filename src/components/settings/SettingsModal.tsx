@@ -19,6 +19,9 @@ interface SettingsModalProps extends SettingsTransferProps {
   onClearCache: () => void;
   onOpenLogViewer: (state?: Pick<LogViewerProps, 'initialTab' | 'initialUsageTab'>) => void;
   setAvailableModels: (models: ModelOption[]) => void;
+  onRefreshModels?: () => void | Promise<void>;
+  isRefreshingModels?: boolean;
+  modelsRefreshError?: string | null;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -28,7 +31,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onImportSettings, onExportSettings,
   onImportHistory, onExportHistory,
   onImportScenarios, onExportScenarios,
-  setAvailableModels
+  setAvailableModels,
+  onRefreshModels,
+  isRefreshingModels,
+  modelsRefreshError
 }) => {
   const [liveSettings, setLiveSettings] = useState(currentSettings);
   
@@ -101,6 +107,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         updateSetting={updateSetting}
                         handleModelChange={handleModelChange}
                         setAvailableModels={setAvailableModels}
+                        onRefreshModels={onRefreshModels}
+                        isRefreshingModels={isRefreshingModels}
+                        modelsRefreshError={modelsRefreshError}
                         onClearHistory={handleRequestClearHistory}
                         onClearCache={handleRequestClearCache}
                         onOpenLogViewer={() => { onOpenLogViewer(); onClose(); }}

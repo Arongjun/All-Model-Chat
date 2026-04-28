@@ -2,7 +2,7 @@ import { act } from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRoot, Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { I18nProvider } from '../../../contexts/I18nContext';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { AboutSection } from './AboutSection';
@@ -11,18 +11,11 @@ describe('AboutSection', () => {
   let container: HTMLDivElement;
   let root: Root;
   const initialState = useSettingsStore.getState();
-  const fetchMock = vi.fn();
   const packageVersion = JSON.parse(
     readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'),
   ).version as string;
 
   beforeEach(() => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      json: async () => ({}),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -34,7 +27,6 @@ describe('AboutSection', () => {
     });
     container.remove();
     useSettingsStore.setState(initialState);
-    vi.unstubAllGlobals();
   });
 
   it('updates translated copy from the global i18n context', async () => {
@@ -47,16 +39,18 @@ describe('AboutSection', () => {
       );
     });
 
-    expect(container.textContent).toContain('View on GitHub');
+    expect(container.textContent).toContain('Arong AI Station');
+    expect(container.textContent).toContain('Local build');
 
     act(() => {
       useSettingsStore.setState({ language: 'zh' });
     });
 
-    expect(container.textContent).toContain('在 GitHub 上查看');
+    expect(container.textContent).toContain('阿荣AI工作站');
+    expect(container.textContent).toContain('当前版本');
   });
 
-  it('keeps the star card visible when GitHub data is unavailable', async () => {
+  it('mirrors the package version without external repository links', async () => {
     await act(async () => {
       useSettingsStore.setState({ language: 'zh' });
       root.render(
@@ -65,61 +59,11 @@ describe('AboutSection', () => {
         </I18nProvider>,
       );
     });
-
-    expect(container.textContent).toContain('不可用');
-  });
-
-  it('localizes release status copy and mirrors the package version', async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ stargazers_count: 785 }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ tag_name: '1.8.7' }),
-      });
-
-    await act(async () => {
-      useSettingsStore.setState({ language: 'zh' });
-      root.render(
-        <I18nProvider>
-          <AboutSection />
-        </I18nProvider>,
-      );
-    });
-
-    const releaseLink = container.querySelector('a[href="https://github.com/yeahhe365/All-Model-Chat/releases"]');
 
     expect(container.textContent).toContain(`v${packageVersion}`);
-    expect(container.textContent).toContain('测试版');
-    expect(container.textContent).toContain('星标');
-    expect(releaseLink?.getAttribute('title')).toBeNull();
-  });
-
-  it('uses a localized update tooltip when a newer release exists', async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ stargazers_count: 785 }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ tag_name: '1.8.9' }),
-      });
-
-    await act(async () => {
-      useSettingsStore.setState({ language: 'zh' });
-      root.render(
-        <I18nProvider>
-          <AboutSection />
-        </I18nProvider>,
-      );
-    });
-
-    const releaseLink = container.querySelector('a[href="https://github.com/yeahhe365/All-Model-Chat/releases"]');
-
-    expect(releaseLink?.getAttribute('title')).toBe('有新版本：1.8.9');
+    expect(container.querySelector('a[href*="github.com"]')).toBeNull();
+    expect(container.textContent).not.toContain('GitHub');
+    expect(container.textContent).not.toContain('星标');
   });
 
   it('does not render the manual update check controls in the about panel', async () => {

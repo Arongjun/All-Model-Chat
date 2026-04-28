@@ -33,12 +33,20 @@ interface InitializeScenarioStateResult {
 
 const DEPRECATED_SCENARIO_IDS = ['cyberpunk-rpg-scenario'];
 
+const markSystemScenario = (scenario: SavedScenario): SavedScenario => ({
+  ...scenario,
+  managedBy: 'system',
+  active: scenario.active ?? true,
+  visibilityMode: scenario.visibilityMode ?? 'all',
+  allowedUserIds: scenario.allowedUserIds ?? [],
+});
+
 const SYSTEM_SCENARIOS: SavedScenario[] = [
   reasonerScenario,
   succinctScenario,
   socraticScenario,
   formalScenario,
-];
+].map(markSystemScenario);
 
 const USER_SCENARIO_SEEDS: UserScenarioSeed[] = [
   {
@@ -73,7 +81,10 @@ const getScenarioFingerprint = (scenario: SavedScenario): string =>
   });
 
 export const getExportableUserScenarios = (scenarios: SavedScenario[]): SavedScenario[] =>
-  scenarios.filter((scenario) => !RESERVED_SCENARIO_IDS.has(scenario.id));
+  scenarios.filter((scenario) => scenario.managedBy !== 'system' && !RESERVED_SCENARIO_IDS.has(scenario.id));
+
+export const getSystemManagedScenarios = (scenarios: SavedScenario[]): SavedScenario[] =>
+  scenarios.filter((scenario) => scenario.managedBy === 'system');
 
 export const buildScenarioExportPayload = (scenarios: SavedScenario[]): ScenarioImportPayload => ({
   type: 'AllModelChat-Scenarios',
@@ -81,10 +92,21 @@ export const buildScenarioExportPayload = (scenarios: SavedScenario[]): Scenario
   scenarios: getExportableUserScenarios(scenarios),
 });
 
-export const buildSavedScenarios = (userScenarios: SavedScenario[]): SavedScenario[] => [
-  ...SYSTEM_SCENARIOS,
+export const buildSavedScenarios = (
+  userScenarios: SavedScenario[],
+  systemScenarios: SavedScenario[] = SYSTEM_SCENARIOS,
+): SavedScenario[] => [
+  ...systemScenarios.map(markSystemScenario),
   ...getExportableUserScenarios(userScenarios),
 ];
+
+export const buildSavedScenariosWithCurrentSystem = (
+  currentScenarios: SavedScenario[],
+  userScenarios: SavedScenario[],
+): SavedScenario[] => {
+  const currentSystemScenarios = getSystemManagedScenarios(currentScenarios);
+  return buildSavedScenarios(userScenarios, currentSystemScenarios);
+};
 
 export const initializeScenarioState = (
   storedScenarios: SavedScenario[],

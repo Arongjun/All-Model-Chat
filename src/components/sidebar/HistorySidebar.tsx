@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { SavedChatSession, ChatGroup } from '../../types';
 import { useI18n } from '../../contexts/I18nContext';
@@ -70,6 +70,33 @@ const MiniSidebarButton = ({ onClick, icon: Icon, title, href }: { onClick: () =
             <Icon size={20} strokeWidth={2} />
         </button>
     );
+};
+
+const setInertWhenHidden = (hidden: boolean) => ({
+  'aria-hidden': hidden,
+  inert: hidden ? '' : undefined,
+} as React.HTMLAttributes<HTMLDivElement> & { inert?: '' });
+
+const containsActiveElement = (container: HTMLDivElement | null) => {
+  if (!container) {
+    return false;
+  }
+
+  const activeElement = container.ownerDocument.activeElement;
+  const HTMLElementClass = container.ownerDocument.defaultView?.HTMLElement ?? HTMLElement;
+  return activeElement instanceof HTMLElementClass && container.contains(activeElement);
+};
+
+const blurActiveElementInside = (container: HTMLDivElement | null) => {
+  if (!container) {
+    return;
+  }
+
+  const activeElement = container.ownerDocument.activeElement;
+  const HTMLElementClass = container.ownerDocument.defaultView?.HTMLElement ?? HTMLElement;
+  if (activeElement instanceof HTMLElementClass && container.contains(activeElement)) {
+    activeElement.blur();
+  }
 };
 
 // Internal component to handle auto-animate for a list of sessions in a category
@@ -150,7 +177,26 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = (props) => {
     handleRenameConfirm, handleRenameKeyDown, setEditingItem, toggleMenu, setActiveMenu, t
   };
 
+  const expandedLayerRef = useRef<HTMLDivElement>(null);
+  const compactLayerRef = useRef<HTMLDivElement>(null);
   const [listParentRef] = useAutoAnimate<HTMLDivElement>({ duration: 200 });
+
+  const blurActiveSidebarElement = useCallback(() => {
+    blurActiveElementInside(expandedLayerRef.current);
+    blurActiveElementInside(compactLayerRef.current);
+  }, []);
+
+  const handleToggleWithFocusReset = useCallback(() => {
+    blurActiveSidebarElement();
+    onToggle();
+  }, [blurActiveSidebarElement, onToggle]);
+
+  useEffect(() => {
+    const layerAboutToHide = isOpen ? compactLayerRef.current : expandedLayerRef.current;
+    if (containsActiveElement(layerAboutToHide)) {
+      (layerAboutToHide?.ownerDocument.activeElement as HTMLElement | null)?.blur();
+    }
+  }, [isOpen]);
 
   return (
     <aside
@@ -159,18 +205,20 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = (props) => {
                  transition-transform duration-300 ease-[cubic-bezier(0.19,1,0.22,1)] md:transition-[width] transform-gpu
                  absolute md:static top-0 left-0 z-50
                  overflow-hidden
+                 shadow-[18px_0_45px_rgba(15,23,42,0.12)] md:shadow-none
                  ${isOpen ? 'w-64 md:w-72 translate-x-0' : 'w-64 md:w-[58px] -translate-x-full md:translate-x-0'}
                  
                  border-r border-[var(--theme-border-primary)]`}
       role="complementary" aria-label={t('history_title')}
     >
       <div
-        aria-hidden={!isOpen}
+        ref={expandedLayerRef}
+        {...setInertWhenHidden(!isOpen)}
         className={`w-64 md:w-72 h-full flex flex-col shrink-0 min-w-[16rem] md:min-w-[18rem] md:absolute md:inset-0 transition-opacity duration-200 ${
           isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-100 pointer-events-auto md:opacity-0 md:pointer-events-none'
         }`}
       >
-        <SidebarHeader isOpen={isOpen} onToggle={onToggle} t={t} />
+        <SidebarHeader isOpen={isOpen} onToggle={handleToggleWithFocusReset} t={t} />
         <SidebarActions 
             onNewChat={onNewChat}
             onCloseSidebar={onAutoClose}
@@ -244,14 +292,15 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = (props) => {
         </div>
       </div>
 
-      <div 
-        aria-hidden={isOpen}
+      <div
+        ref={compactLayerRef}
+        {...setInertWhenHidden(isOpen)}
         className={`hidden md:flex absolute inset-0 flex-col items-center py-4 h-full gap-[0.56rem] w-full min-w-[58px] cursor-pointer hover:bg-[var(--theme-bg-tertiary)]/30 transition-colors transition-opacity duration-200 ${
           isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100 pointer-events-auto'
         }`}
-        onClick={onToggle}
+        onClick={handleToggleWithFocusReset}
       >
-          <MiniSidebarButton onClick={onToggle} icon={IconSidebarToggle} title={t('historySidebarOpen')} />
+          <MiniSidebarButton onClick={handleToggleWithFocusReset} icon={IconSidebarToggle} title={t('historySidebarOpen')} />
           
           <div className="w-8 h-px bg-[var(--theme-border-primary)] my-1"></div>
           

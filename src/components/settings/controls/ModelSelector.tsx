@@ -9,13 +9,19 @@ interface ModelSelectorProps {
   selectedModelId: string;
   onSelectModel: (id: string) => void;
   setAvailableModels: (models: ModelOption[]) => void;
+  onRefreshModels?: () => void | Promise<void>;
+  isRefreshingModels?: boolean;
+  modelsRefreshError?: string | null;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
   availableModels,
   selectedModelId,
   onSelectModel,
-  setAvailableModels
+  setAvailableModels,
+  onRefreshModels,
+  isRefreshingModels,
+  modelsRefreshError
 }) => {
   const [isEditingList, setIsEditingList] = useState(false);
 
@@ -24,7 +30,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         <ModelSelectorHeader 
             isEditingList={isEditingList} 
             setIsEditingList={setIsEditingList} 
+            onRefreshModels={onRefreshModels}
+            isRefreshingModels={isRefreshingModels}
         />
+
+        {!isEditingList && modelsRefreshError && (
+            <div className="rounded-xl border border-[var(--theme-border-danger)] bg-[var(--theme-bg-danger)]/10 px-3 py-2 text-xs text-[var(--theme-text-danger)]">
+                {modelsRefreshError}
+            </div>
+        )}
 
         {isEditingList ? (
             <ModelListEditor 

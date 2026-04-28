@@ -34,6 +34,10 @@ export interface UploadedFile {
   // Fields for API uploaded files like PDFs
   fileUri?: string; // URI returned by Gemini API (e.g., "files/xxxxxxxx")
   fileApiName?: string; // Full resource name from API (e.g., "files/xxxxxxxx")
+  cloudAttachmentId?: string; // Server-side object storage attachment id for cloud chat sync
+  cloudStorageKey?: string; // Object storage key, kept for diagnostics only
+  cloudSyncState?: 'synced' | 'local_only' | 'failed';
+  cloudSyncError?: string;
   uploadState?: 'pending' | 'uploading' | 'processing_api' | 'active' | 'failed' | 'cancelled'; // State of the file on Gemini API
   abortController?: AbortController; // Added for cancelling uploads
   uploadSpeed?: string; // Added for upload speed display
@@ -120,6 +124,13 @@ export interface SavedScenario {
   title: string;
   messages: PreloadedMessage[];
   systemInstruction?: string;
+  managedBy?: 'system' | 'user';
+  visibilityMode?: 'all' | 'members' | 'admins' | 'users';
+  allowedUserIds?: string[];
+  active?: boolean;
+  sortOrder?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CommandInfo {

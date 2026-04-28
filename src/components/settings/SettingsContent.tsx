@@ -19,6 +19,9 @@ interface SettingsContentProps extends SettingsTransferProps {
     updateSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
     handleModelChange: (modelId: string) => void;
     setAvailableModels: (models: ModelOption[]) => void;
+    onRefreshModels?: () => void | Promise<void>;
+    isRefreshingModels?: boolean;
+    modelsRefreshError?: string | null;
     onClearHistory: () => void;
     onClearCache: () => void;
     onOpenLogViewer: (state?: Pick<LogViewerProps, 'initialTab' | 'initialUsageTab'>) => void;
@@ -33,6 +36,9 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
     updateSetting,
     handleModelChange,
     setAvailableModels,
+    onRefreshModels,
+    isRefreshingModels,
+    modelsRefreshError,
     onClearHistory,
     onClearCache,
     onOpenLogViewer,
@@ -105,6 +111,9 @@ export const SettingsContent: React.FC<SettingsContentProps> = ({
                         availableModels={availableModels}
                         t={t}
                         setAvailableModels={handleAvailableModelsChange}
+                        onRefreshModels={onRefreshModels}
+                        isRefreshingModels={isRefreshingModels}
+                        modelsRefreshError={modelsRefreshError}
                     />
                 </div>
             )}

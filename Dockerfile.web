@@ -17,6 +17,7 @@ COPY docker/web-entrypoint.sh /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 
 RUN sed -i 's/\r$//' /docker-entrypoint.d/40-runtime-config.sh \
-    && chmod +x /docker-entrypoint.d/40-runtime-config.sh
+    && chmod +x /docker-entrypoint.d/40-runtime-config.sh \
+    && chmod -R a+rX /usr/share/nginx/html
 
 EXPOSE 80

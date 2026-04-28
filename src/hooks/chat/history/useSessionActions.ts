@@ -4,7 +4,7 @@ import { logService } from '../../../services/logService';
 import { generateUniqueId } from '../../../utils/chat/ids';
 import { createNewSession } from '../../../utils/chat/session';
 import { cleanupFilePreviewUrls } from '../../../utils/fileHelpers';
-import { dbService } from '../../../utils/db';
+import { getSessionFromCloudOrLocal } from '../../../services/chatSessionPersistence';
 import { removeSessionScopedLocalStorageEntries } from '../../../utils/sessionLocalStorage';
 
 interface UseSessionActionsProps {
@@ -63,7 +63,7 @@ export const useSessionActions = ({
 
     const handleDuplicateSession = useCallback(async (sessionId: string) => {
         logService.info(`Duplicating session: ${sessionId}`);
-        const persistedSession = await dbService.getSession(sessionId);
+        const persistedSession = await getSessionFromCloudOrLocal(sessionId);
 
         updateAndPersistSessions(prev => {
             const sessionToDuplicate = prev.find(s => s.id === sessionId);

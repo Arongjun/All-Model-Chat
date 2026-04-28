@@ -5,6 +5,12 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { GoogleGenAI } from '@google/genai';
 import type { ApiServerConfig } from './config.js';
 import {
+  CloudChatService,
+  type CloudChatGroupPayload,
+  type CloudChatSessionPayload,
+  type SystemScenarioPayload,
+} from './cloudChat.js';
+import {
   WorkspaceError,
   WorkspaceService,
   type WorkspaceApiProvider,
@@ -61,6 +67,7 @@ interface CreateServerDependencies {
   fetchImpl?: typeof fetch;
   createLiveToken?: (apiKey: string) => Promise<LiveTokenPayload>;
   workspaceService?: WorkspaceService;
+  cloudChatService?: CloudChatService;
 }
 
 type CreateServerConfig = Pick<
@@ -79,6 +86,15 @@ type CreateServerConfig = Pick<
       | 'workspaceLegacyJsonFilePath'
       | 'anthropicApiBase'
       | 'anthropicApiKey'
+      | 'objectStorageEnabled'
+      | 'objectStorageEndpoint'
+      | 'objectStorageRegion'
+      | 'objectStorageBucket'
+      | 'objectStorageAccessKeyId'
+      | 'objectStorageSecretAccessKey'
+      | 'objectStorageForcePathStyle'
+      | 'objectStoragePublicBaseUrl'
+      | 'objectStoragePrefix'
     >
   > & {
     workspaceDataFilePath?: string;
@@ -112,6 +128,40 @@ interface AdminProviderRuntimeConfigSummary {
   workspaceOverrideConfigured: boolean;
   updatedAt: string | null;
 }
+
+type ProviderModelDiscoveryStatus = 'available' | 'not_configured' | 'error';
+
+interface DiscoveredModelSummary {
+  id: string;
+  rawId: string;
+  name: string;
+  provider: WorkspaceApiProvider;
+  source: 'api';
+}
+
+interface ProviderModelDiscoverySummary {
+  provider: WorkspaceApiProvider;
+  label: string;
+  apiBase: string;
+  apiKeySource: ProviderConfigSource;
+  configured: boolean;
+  status: ProviderModelDiscoveryStatus;
+  models: DiscoveredModelSummary[];
+  error?: string;
+}
+
+const SUPPORTED_OPENAI_IMAGE_MODEL_IDS = new Set(['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2']);
+const EXCLUDED_OPENAI_MODEL_ID_PARTS = [
+  'audio',
+  'embedding',
+  'moderation',
+  'realtime',
+  'rerank',
+  'search',
+  'transcribe',
+  'tts',
+  'whisper',
+];
 
 export async function createLiveTokenWithGemini(apiKey: string): Promise<LiveTokenPayload> {
   const client = new GoogleGenAI({
@@ -220,6 +270,22 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
   }
 }
 
+async function readRawBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > maxBytes) {
+      throw new WorkspaceError(413, `Request body is too large. Maximum allowed size is ${maxBytes} bytes.`);
+    }
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks);
+}
+
 function getConnectionManagedHeaders(value: string | null | undefined): Set<string> {
   if (!value) {
     return new Set();
@@ -324,6 +390,260 @@ function buildAdminProviderRuntimeConfigSummaries(
   });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function stripKnownProviderPrefix(modelId: string): string {
+  return modelId.trim().replace(/^(openai|anthropic):/i, '').trim();
+}
+
+function stripGeminiModelPrefix(modelId: string): string {
+  return modelId.trim().replace(/^models\//i, '').trim();
+}
+
+function isSupportedOpenAiImageModel(modelId: string): boolean {
+  return SUPPORTED_OPENAI_IMAGE_MODEL_IDS.has(stripKnownProviderPrefix(modelId).toLowerCase());
+}
+
+function shouldExposeOpenAiModel(modelId: string): boolean {
+  const lowerId = stripKnownProviderPrefix(modelId).toLowerCase();
+
+  if (isSupportedOpenAiImageModel(lowerId)) {
+    return true;
+  }
+
+  if (lowerId.startsWith('gpt-image') || lowerId.startsWith('dall-e') || lowerId.includes('image')) {
+    return false;
+  }
+
+  return !EXCLUDED_OPENAI_MODEL_ID_PARTS.some((part) => lowerId.includes(part));
+}
+
+function shouldExposeGeminiModel(model: Record<string, unknown>): boolean {
+  const methods = Array.isArray(model.supportedGenerationMethods)
+    ? model.supportedGenerationMethods.map(String)
+    : [];
+
+  if (methods.length === 0) {
+    return true;
+  }
+
+  return methods.some((method) =>
+    method === 'generateContent'
+    || method === 'streamGenerateContent'
+    || method === 'generateImages'
+    || method === 'bidiGenerateContent',
+  );
+}
+
+function createDiscoveredModel(
+  provider: WorkspaceApiProvider,
+  rawModelId: string,
+  displayName?: string | null,
+): DiscoveredModelSummary | null {
+  const normalizedRawId = provider === 'gemini'
+    ? stripGeminiModelPrefix(rawModelId)
+    : stripKnownProviderPrefix(rawModelId);
+
+  if (!normalizedRawId) {
+    return null;
+  }
+
+  const id = provider === 'openai'
+    ? isSupportedOpenAiImageModel(normalizedRawId)
+      ? normalizedRawId
+      : `openai:${normalizedRawId}`
+    : provider === 'anthropic'
+      ? `anthropic:${normalizedRawId}`
+      : normalizedRawId;
+
+  return {
+    id,
+    rawId: normalizedRawId,
+    name: displayName?.trim() || normalizedRawId,
+    provider,
+    source: 'api',
+  };
+}
+
+function parseGeminiModelPayload(payload: unknown): DiscoveredModelSummary[] {
+  if (!isRecord(payload) || !Array.isArray(payload.models)) {
+    return [];
+  }
+
+  return payload.models
+    .filter(isRecord)
+    .filter(shouldExposeGeminiModel)
+    .map((model) => {
+      const rawId = readString(model.name);
+      if (!rawId) {
+        return null;
+      }
+      return createDiscoveredModel('gemini', rawId, readString(model.displayName));
+    })
+    .filter((model): model is DiscoveredModelSummary => model !== null);
+}
+
+function parseOpenAiModelPayload(payload: unknown): DiscoveredModelSummary[] {
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return [];
+  }
+
+  return payload.data
+    .filter(isRecord)
+    .map((model) => readString(model.id))
+    .filter((modelId): modelId is string => !!modelId && shouldExposeOpenAiModel(modelId))
+    .map((modelId) => createDiscoveredModel('openai', modelId, modelId))
+    .filter((model): model is DiscoveredModelSummary => model !== null);
+}
+
+function parseAnthropicModelPayload(payload: unknown): DiscoveredModelSummary[] {
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return [];
+  }
+
+  return payload.data
+    .filter(isRecord)
+    .map((model) => {
+      const rawId = readString(model.id);
+      if (!rawId) {
+        return null;
+      }
+      return createDiscoveredModel('anthropic', rawId, readString(model.display_name) || readString(model.displayName));
+    })
+    .filter((model): model is DiscoveredModelSummary => model !== null);
+}
+
+async function getUpstreamErrorText(response: Response): Promise<string> {
+  try {
+    const payload = await response.json();
+    if (isRecord(payload)) {
+      const error = payload.error;
+      if (isRecord(error) && typeof error.message === 'string') {
+        return error.message;
+      }
+      if (typeof payload.message === 'string') {
+        return payload.message;
+      }
+    }
+  } catch {
+    // Fall back to text below.
+  }
+
+  try {
+    const text = await response.text();
+    return text.trim() || response.statusText || `HTTP ${response.status}`;
+  } catch {
+    return response.statusText || `HTTP ${response.status}`;
+  }
+}
+
+async function discoverProviderModels(
+  config: ResolvedServerConfig,
+  workspaceSettings: WorkspaceApiProviderSettings,
+  provider: WorkspaceApiProvider,
+  fetchImpl: typeof fetch,
+): Promise<ProviderModelDiscoverySummary> {
+  const providerConfig = resolveProviderRuntimeConfig(config, workspaceSettings, provider);
+  const baseSummary = {
+    provider,
+    label: getProviderLabel(provider),
+    apiBase: providerConfig.apiBase,
+    apiKeySource: providerConfig.apiKeySource,
+    configured: providerConfig.configured,
+  };
+
+  if (!providerConfig.apiKey) {
+    return {
+      ...baseSummary,
+      status: 'not_configured',
+      models: [],
+    };
+  }
+
+  const listUrl = provider === 'gemini'
+    ? `${providerConfig.apiBase.replace(/\/+$/, '')}/v1beta/models`
+    : provider === 'anthropic'
+      ? `${normalizeAnthropicApiBase(providerConfig.apiBase)}/v1/models`
+      : `${normalizeOpenAiApiBase(providerConfig.apiBase)}/v1/models`;
+  const headers = new Headers();
+  if (provider === 'gemini') {
+    headers.set('x-goog-api-key', providerConfig.apiKey);
+  } else if (provider === 'anthropic') {
+    headers.set('x-api-key', providerConfig.apiKey);
+    headers.set('anthropic-version', '2023-06-01');
+  } else {
+    headers.set('authorization', `Bearer ${providerConfig.apiKey}`);
+  }
+
+  try {
+    const upstreamResponse = await fetchImpl(listUrl, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!upstreamResponse.ok) {
+      return {
+        ...baseSummary,
+        status: 'error',
+        models: [],
+        error: await getUpstreamErrorText(upstreamResponse),
+      };
+    }
+
+    const payload = await upstreamResponse.json();
+    const models = provider === 'gemini'
+      ? parseGeminiModelPayload(payload)
+      : provider === 'anthropic'
+        ? parseAnthropicModelPayload(payload)
+        : parseOpenAiModelPayload(payload);
+
+    return {
+      ...baseSummary,
+      status: 'available',
+      models,
+    };
+  } catch (error) {
+    return {
+      ...baseSummary,
+      status: 'error',
+      models: [],
+      error: error instanceof Error ? error.message : 'Unable to query provider models.',
+    };
+  }
+}
+
+async function discoverWorkspaceModels(
+  config: ResolvedServerConfig,
+  workspaceSettings: WorkspaceApiProviderSettings,
+  fetchImpl: typeof fetch,
+): Promise<{ generatedAt: string; providers: ProviderModelDiscoverySummary[]; models: DiscoveredModelSummary[] }> {
+  const providers = await Promise.all(
+    (['gemini', 'openai', 'anthropic'] as WorkspaceApiProvider[])
+      .map((provider) => discoverProviderModels(config, workspaceSettings, provider, fetchImpl)),
+  );
+  const seenModelIds = new Set<string>();
+  const models = providers.flatMap((provider) => provider.models).filter((model) => {
+    const normalizedId = model.id.toLowerCase();
+    if (seenModelIds.has(normalizedId)) {
+      return false;
+    }
+    seenModelIds.add(normalizedId);
+    return true;
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    providers,
+    models,
+  };
+}
+
 function buildProxyHeaders(
   request: IncomingMessage,
   authHeaders: Record<string, string>,
@@ -409,7 +729,7 @@ async function ensureWorkspaceSessionIfRequired(
     request,
     response,
     401,
-    { error: '请先登录阿荣AI工作站后再使用托管模型能力。' },
+    { error: '请先登录后再聊天。打开左侧菜单底部「设置」→「账号与额度」登录；没有账号可用邀请码注册。' },
     config.allowedOrigins,
   );
   return false;
@@ -424,6 +744,45 @@ function getWorkspaceErrorMessage(error: unknown): string {
     return error.message;
   }
   return error instanceof Error ? error.message : 'Workspace request failed.';
+}
+
+async function requireWorkspaceUser(
+  request: IncomingMessage,
+  workspaceService: WorkspaceService,
+) {
+  const session = await workspaceService.getSession(getWorkspaceSessionToken(request, workspaceService));
+  if (!session.currentUser) {
+    throw new WorkspaceError(
+      401,
+      '请先登录后再使用云端聊天记录。打开左侧菜单底部「设置」→「账号与额度」登录；没有账号可用邀请码注册。',
+    );
+  }
+  return session.currentUser;
+}
+
+async function requireWorkspaceAdmin(
+  request: IncomingMessage,
+  workspaceService: WorkspaceService,
+) {
+  const adminState = await workspaceService.getAdminState(getWorkspaceSessionToken(request, workspaceService));
+  return adminState.currentUser;
+}
+
+function decodeHeaderText(value: string | string[] | undefined, fallback: string): string {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  if (!rawValue) {
+    return fallback;
+  }
+
+  try {
+    return decodeURIComponent(rawValue);
+  } catch {
+    return rawValue;
+  }
+}
+
+function encodeContentDispositionFilename(fileName: string): string {
+  return `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
 function getWorkspaceUsageQuery(searchParams: URLSearchParams): WorkspaceUsageQuery {
@@ -441,6 +800,369 @@ function getWorkspaceUsageQuery(searchParams: URLSearchParams): WorkspaceUsageQu
     operationType: readOptional('operationType') as WorkspaceUsageQuery['operationType'],
     search: readOptional('search') ?? undefined,
   };
+}
+
+async function handleCloudChatRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: ResolvedServerConfig,
+  workspaceService: WorkspaceService,
+  cloudChatService: CloudChatService,
+): Promise<boolean> {
+  const requestUrl = new URL(request.url || '/', 'http://localhost');
+  const path = requestUrl.pathname;
+  const method = request.method || 'GET';
+  const sendWorkspaceError = (error: unknown) => {
+    sendJson(
+      request,
+      response,
+      getWorkspaceErrorStatus(error),
+      { error: getWorkspaceErrorMessage(error) },
+      config.allowedOrigins,
+    );
+  };
+
+  try {
+    if (method === 'GET' && path === '/api/workspace/cloud-chat/status') {
+      const session = await workspaceService.getSession(getWorkspaceSessionToken(request, workspaceService));
+      sendJson(
+        request,
+        response,
+        200,
+        await cloudChatService.getStatus(Boolean(session.currentUser)),
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/scenarios') {
+      const session = await workspaceService.getSession(getWorkspaceSessionToken(request, workspaceService));
+      sendJson(
+        request,
+        response,
+        200,
+        { scenarios: await cloudChatService.listVisibleSystemScenarios(session.currentUser) },
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/admin/object-storage') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      sendJson(
+        request,
+        response,
+        200,
+        await cloudChatService.getObjectStorageSummary(),
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (method === 'PATCH' && path === '/api/workspace/admin/object-storage') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const body = await readJsonBody(request);
+      const readOptionalText = (value: unknown): string | null | undefined =>
+        typeof value === 'string' || value === null ? value : undefined;
+      const summary = await cloudChatService.updateObjectStorageSettings({
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        endpoint: readOptionalText(body.endpoint),
+        region: readOptionalText(body.region),
+        bucket: readOptionalText(body.bucket),
+        accessKeyId: readOptionalText(body.accessKeyId),
+        secretAccessKey: readOptionalText(body.secretAccessKey),
+        clearSecretAccessKey: body.clearSecretAccessKey === true,
+        forcePathStyle: typeof body.forcePathStyle === 'boolean' ? body.forcePathStyle : undefined,
+        publicBaseUrl: readOptionalText(body.publicBaseUrl),
+        prefix: readOptionalText(body.prefix),
+      });
+      sendJson(request, response, 200, summary, config.allowedOrigins);
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/admin/cloud-chat/sessions') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      sendJson(
+        request,
+        response,
+        200,
+        await cloudChatService.listAdminSessions({
+          userId: requestUrl.searchParams.get('userId'),
+          search: requestUrl.searchParams.get('search'),
+          page: Number(requestUrl.searchParams.get('page') ?? 1),
+          pageSize: Number(requestUrl.searchParams.get('pageSize') ?? 20),
+        }),
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    const adminSessionMatch = path.match(/^\/api\/workspace\/admin\/cloud-chat\/sessions\/([^/]+)\/([^/]+)$/);
+    if (adminSessionMatch && method === 'GET') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const session = await cloudChatService.getAdminSession(
+        decodeURIComponent(adminSessionMatch[1] || ''),
+        decodeURIComponent(adminSessionMatch[2] || ''),
+      );
+      if (!session) {
+        throw new WorkspaceError(404, 'Cloud chat session was not found.');
+      }
+      sendJson(request, response, 200, { session }, config.allowedOrigins, { 'cache-control': 'no-store' });
+      return true;
+    }
+
+    if (method === 'POST' && path === '/api/workspace/admin/cloud-chat/sessions/delete') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const body = await readJsonBody(request);
+      const result = await cloudChatService.deleteAdminSessions(
+        Array.isArray(body.sessions)
+          ? body.sessions
+            .filter((item): item is { userId: string; id: string } =>
+              !!item && typeof item === 'object'
+              && typeof (item as { userId?: unknown }).userId === 'string'
+              && typeof (item as { id?: unknown }).id === 'string',
+            )
+          : [],
+      );
+      sendJson(request, response, 200, result, config.allowedOrigins);
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/admin/cloud-chat/attachments') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      sendJson(
+        request,
+        response,
+        200,
+        await cloudChatService.listAdminAttachments({
+          userId: requestUrl.searchParams.get('userId'),
+          sessionId: requestUrl.searchParams.get('sessionId'),
+          search: requestUrl.searchParams.get('search'),
+          page: Number(requestUrl.searchParams.get('page') ?? 1),
+          pageSize: Number(requestUrl.searchParams.get('pageSize') ?? 20),
+        }),
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (method === 'POST' && path === '/api/workspace/admin/cloud-chat/attachments/delete') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const body = await readJsonBody(request);
+      const result = await cloudChatService.deleteAdminAttachments(
+        Array.isArray(body.attachmentIds)
+          ? body.attachmentIds.filter((id): id is string => typeof id === 'string')
+          : [],
+      );
+      sendJson(request, response, 200, result, config.allowedOrigins);
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/admin/cloud-chat/retention') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      sendJson(request, response, 200, await cloudChatService.getRetentionSettings(), config.allowedOrigins);
+      return true;
+    }
+
+    if (method === 'PATCH' && path === '/api/workspace/admin/cloud-chat/retention') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const body = await readJsonBody(request);
+      sendJson(
+        request,
+        response,
+        200,
+        await cloudChatService.updateRetentionSettings({
+          enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+          maxAttachmentAgeDays: typeof body.maxAttachmentAgeDays === 'number'
+            ? body.maxAttachmentAgeDays
+            : undefined,
+          maxTotalAttachmentBytes: typeof body.maxTotalAttachmentBytes === 'number'
+            ? body.maxTotalAttachmentBytes
+            : undefined,
+        }),
+        config.allowedOrigins,
+      );
+      return true;
+    }
+
+    if (method === 'POST' && path === '/api/workspace/admin/cloud-chat/cleanup') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const body = await readJsonBody(request);
+      sendJson(
+        request,
+        response,
+        200,
+        await cloudChatService.cleanupAttachments({
+          dryRun: body.dryRun !== false,
+          maxAttachmentAgeDays: typeof body.maxAttachmentAgeDays === 'number'
+            ? body.maxAttachmentAgeDays
+            : undefined,
+          maxTotalAttachmentBytes: typeof body.maxTotalAttachmentBytes === 'number'
+            ? body.maxTotalAttachmentBytes
+            : undefined,
+        }),
+        config.allowedOrigins,
+      );
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/admin/system-scenarios') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      sendJson(
+        request,
+        response,
+        200,
+        { scenarios: await cloudChatService.listAdminSystemScenarios() },
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (method === 'POST' && path === '/api/workspace/admin/system-scenarios') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const body = await readJsonBody(request);
+      const scenario = await cloudChatService.upsertSystemScenario(body as Partial<SystemScenarioPayload>);
+      sendJson(request, response, 200, { scenario }, config.allowedOrigins);
+      return true;
+    }
+
+    const adminScenarioMatch = path.match(/^\/api\/workspace\/admin\/system-scenarios\/([^/]+)$/);
+    if (adminScenarioMatch && method === 'PUT') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      const body = await readJsonBody(request);
+      const scenario = await cloudChatService.upsertSystemScenario({
+        ...(body as Partial<SystemScenarioPayload>),
+        id: decodeURIComponent(adminScenarioMatch[1] || ''),
+      });
+      sendJson(request, response, 200, { scenario }, config.allowedOrigins);
+      return true;
+    }
+
+    if (adminScenarioMatch && method === 'DELETE') {
+      await requireWorkspaceAdmin(request, workspaceService);
+      await cloudChatService.deleteSystemScenario(decodeURIComponent(adminScenarioMatch[1] || ''));
+      sendJson(request, response, 200, { success: true }, config.allowedOrigins);
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/cloud-chat/sessions') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      sendJson(
+        request,
+        response,
+        200,
+        { sessions: await cloudChatService.listSessions(user.id) },
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/cloud-chat/groups') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      sendJson(
+        request,
+        response,
+        200,
+        { groups: await cloudChatService.listGroups(user.id) },
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (method === 'PUT' && path === '/api/workspace/cloud-chat/groups') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      const body = await readJsonBody(request);
+      const groups = await cloudChatService.replaceGroups(
+        user.id,
+        Array.isArray(body.groups) ? body.groups as CloudChatGroupPayload[] : [],
+      );
+      sendJson(request, response, 200, { groups }, config.allowedOrigins);
+      return true;
+    }
+
+    const sessionMatch = path.match(/^\/api\/workspace\/cloud-chat\/sessions\/([^/]+)$/);
+    if (sessionMatch && method === 'GET') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      const session = await cloudChatService.getSession(user.id, decodeURIComponent(sessionMatch[1] || ''));
+      if (!session) {
+        throw new WorkspaceError(404, 'Cloud chat session was not found.');
+      }
+      sendJson(
+        request,
+        response,
+        200,
+        { session },
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
+      return true;
+    }
+
+    if (sessionMatch && method === 'PUT') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      const body = await readJsonBody(request);
+      const session = await cloudChatService.saveSession(
+        user.id,
+        body.session as unknown as CloudChatSessionPayload,
+      );
+      sendJson(request, response, 200, { session }, config.allowedOrigins);
+      return true;
+    }
+
+    if (sessionMatch && method === 'DELETE') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      await cloudChatService.deleteSession(user.id, decodeURIComponent(sessionMatch[1] || ''));
+      sendJson(request, response, 200, { success: true }, config.allowedOrigins);
+      return true;
+    }
+
+    if (method === 'POST' && path === '/api/workspace/cloud-chat/attachments') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      const body = await readRawBody(request, 100 * 1024 * 1024);
+      const attachment = await cloudChatService.uploadAttachment(user.id, {
+        fileId: decodeHeaderText(request.headers['x-file-id'], ''),
+        sessionId: decodeHeaderText(request.headers['x-session-id'], ''),
+        messageId: decodeHeaderText(request.headers['x-message-id'], ''),
+        name: decodeHeaderText(request.headers['x-file-name'], 'attachment'),
+        type: decodeHeaderText(request.headers['content-type'], 'application/octet-stream'),
+        size: body.length,
+        body,
+      });
+      sendJson(request, response, 200, { attachment }, config.allowedOrigins);
+      return true;
+    }
+
+    const attachmentMatch = path.match(/^\/api\/workspace\/cloud-chat\/attachments\/([^/]+)$/);
+    if (attachmentMatch && method === 'GET') {
+      const user = await requireWorkspaceUser(request, workspaceService);
+      const attachment = await cloudChatService.downloadAttachment(
+        user.id,
+        decodeURIComponent(attachmentMatch[1] || ''),
+      );
+      response.writeHead(200, {
+        ...getCorsHeaders(request, config.allowedOrigins),
+        'cache-control': 'private, max-age=300',
+        'content-type': attachment.contentType || attachment.type,
+        'content-length': String(attachment.contentLength),
+        'content-disposition': encodeContentDispositionFilename(attachment.name),
+      });
+      response.end(attachment.body);
+      return true;
+    }
+  } catch (error) {
+    sendWorkspaceError(error);
+    return true;
+  }
+
+  return false;
 }
 
 function getRechargePaymentMethod(value: unknown): RechargePaymentMethod | undefined {
@@ -467,10 +1189,23 @@ async function handleWorkspaceRequest(
   response: ServerResponse,
   config: ResolvedServerConfig,
   workspaceService: WorkspaceService,
+  cloudChatService: CloudChatService,
+  fetchImpl: typeof fetch,
 ): Promise<boolean> {
   const requestUrl = new URL(request.url || '/', 'http://localhost');
   const path = requestUrl.pathname;
   const method = request.method || 'GET';
+
+  const cloudHandled = await handleCloudChatRequest(
+    request,
+    response,
+    config,
+    workspaceService,
+    cloudChatService,
+  );
+  if (cloudHandled) {
+    return true;
+  }
 
   const sendWorkspaceError = (error: unknown) => {
     sendJson(
@@ -577,6 +1312,30 @@ async function handleWorkspaceRequest(
     if (method === 'GET' && path === '/api/workspace/dashboard') {
       const dashboard = await workspaceService.getDashboard(getWorkspaceSessionToken(request, workspaceService));
       sendJson(request, response, 200, dashboard, config.allowedOrigins);
+      return true;
+    }
+
+    if (method === 'GET' && path === '/api/workspace/models') {
+      const hasWorkspaceAccess = await ensureWorkspaceSessionIfRequired(
+        request,
+        response,
+        config,
+        workspaceService,
+      );
+      if (!hasWorkspaceAccess) {
+        return true;
+      }
+
+      const workspaceApiSettings = await workspaceService.getRuntimeApiSettings();
+      const discovery = await discoverWorkspaceModels(config, workspaceApiSettings, fetchImpl);
+      sendJson(
+        request,
+        response,
+        200,
+        discovery,
+        config.allowedOrigins,
+        { 'cache-control': 'no-store' },
+      );
       return true;
     }
 
@@ -1466,6 +2225,24 @@ export function createServer(
       legacyJsonFilePath: config.workspaceLegacyJsonFilePath,
       sessionTtlHours: config.workspaceSessionTtlHours,
     });
+  const workspaceDatabaseFilePath = config.workspaceDatabaseFilePath
+    ?? config.workspaceDataFilePath
+    ?? 'server/data/arong-workspace.sqlite';
+  const cloudChatService = dependencies.cloudChatService ?? new CloudChatService(
+    workspaceDatabaseFilePath,
+    {
+      enabled: config.objectStorageEnabled,
+      endpoint: config.objectStorageEndpoint,
+      region: config.objectStorageRegion,
+      bucket: config.objectStorageBucket,
+      accessKeyId: config.objectStorageAccessKeyId,
+      secretAccessKey: config.objectStorageSecretAccessKey,
+      forcePathStyle: config.objectStorageForcePathStyle,
+      publicBaseUrl: config.objectStoragePublicBaseUrl,
+      prefix: config.objectStoragePrefix,
+    },
+    fetchImpl,
+  );
 
   return http.createServer(async (request, response) => {
     try {
@@ -1491,6 +2268,8 @@ export function createServer(
           response,
           resolvedConfig,
           workspaceService,
+          cloudChatService,
+          fetchImpl,
         );
         if (handled) {
           return;

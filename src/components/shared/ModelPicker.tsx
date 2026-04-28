@@ -14,7 +14,12 @@ import {
     Speech,
 } from 'lucide-react';
 import { useClickOutside } from '../../hooks/useClickOutside';
-import { getModelCapabilities, isGeminiRoboticsModel } from '../../utils/modelHelpers';
+import {
+    getModelCapabilities,
+    hasAnthropicProviderPrefix,
+    hasOpenAiProviderPrefix,
+    isGeminiRoboticsModel,
+} from '../../utils/modelHelpers';
 import { buildModelCatalog, filterModelCatalog, type ModelCatalogCategory, type ModelCatalogEntry } from '../../utils/modelCatalog';
 
 const MODEL_ICON_SIZE = 18;
@@ -42,6 +47,8 @@ export const getModelIcon = (model: ModelOption | undefined) => {
     if (isGemini3ImageModel || isFlashImageModel) return <Banana size={MODEL_ICON_SIZE} className="text-yellow-500 dark:text-yellow-400 flex-shrink-0" strokeWidth={1.5} />;
     if (isGeminiRoboticsModel(id)) return <ScanEye size={MODEL_ICON_SIZE} className="text-emerald-500 dark:text-emerald-400 flex-shrink-0" strokeWidth={1.5} />;
     if (isGemmaModel) return <Layers3 size={MODEL_ICON_SIZE} className="text-violet-500 dark:text-violet-400 flex-shrink-0" strokeWidth={1.5} />;
+    if (hasOpenAiProviderPrefix(id)) return <Sparkles size={MODEL_ICON_SIZE} className="text-emerald-500 dark:text-emerald-400 flex-shrink-0" strokeWidth={1.5} />;
+    if (hasAnthropicProviderPrefix(id)) return <Box size={MODEL_ICON_SIZE} className="text-orange-500 dark:text-orange-400 flex-shrink-0" strokeWidth={1.5} />;
     
     // Google text models share the same chat icon in the picker.
     if (normalizedId.includes('gemini')) {

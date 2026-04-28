@@ -464,6 +464,97 @@ describe('chatApi media resolution routing', () => {
     );
   });
 
+  it('forwards OpenAI-compatible reasoning effort and reasoning split options when configured', async () => {
+    vi.stubGlobal('fetch', mockFetch);
+    window.__AMC_RUNTIME_CONFIG__ = {
+      useApiProxy: false,
+    };
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'Reasoned answer' } }],
+        }),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        },
+      ),
+    );
+
+    await sendStatelessMessageNonStreamApi(
+      'openai-key',
+      'openai:gpt-5.3-codex',
+      [],
+      [{ text: 'Think carefully' }],
+      {
+        openAiReasoningEffort: 'high',
+        openAiReasoningSplit: true,
+      },
+      new AbortController().signal,
+      vi.fn(),
+      vi.fn(),
+    );
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: 'gpt-5.3-codex',
+      reasoning_effort: 'high',
+      reasoning_split: true,
+    });
+  });
+
+  it('extracts OpenAI-compatible reasoning details as thoughts when providers return them', async () => {
+    vi.stubGlobal('fetch', mockFetch);
+    window.__AMC_RUNTIME_CONFIG__ = {
+      useApiProxy: false,
+    };
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'Final answer',
+                reasoning_details: [
+                  { type: 'reasoning.summary', summary: 'Checked the constraints.' },
+                ],
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        },
+      ),
+    );
+
+    const onComplete = vi.fn();
+
+    await sendStatelessMessageNonStreamApi(
+      'openai-key',
+      'openai:gpt-5.3-codex',
+      [],
+      [{ text: 'Answer with reasoning details' }],
+      {},
+      new AbortController().signal,
+      vi.fn(),
+      onComplete,
+    );
+
+    expect(onComplete).toHaveBeenCalledWith(
+      [{ text: 'Final answer' }],
+      'Checked the constraints.',
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
   it('streams OpenAI-compatible chat through the sibling server-managed proxy', async () => {
     vi.stubGlobal('fetch', mockFetch);
     mockGetAppSettings.mockResolvedValue({

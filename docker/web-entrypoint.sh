@@ -53,3 +53,5 @@ window.__AMC_RUNTIME_CONFIG__ = {
   liveApiEphemeralTokenEndpoint: '${live_api_ephemeral_token_endpoint_escaped}',
 };
 EOF
+
+chmod 0644 /usr/share/nginx/html/runtime-config.js

@@ -976,6 +976,7 @@ describe('createServer', () => {
     const unauthorizedBody = (await unauthorizedResponse.json()) as Record<string, unknown>;
     expect(unauthorizedResponse.status).toBe(401);
     expect(String(unauthorizedBody.error)).toContain('登录');
+    expect(String(unauthorizedBody.error)).toContain('设置');
 
     const memberLoginResponse = await fetch(`${started.baseUrl}/api/workspace/session/login`, {
       method: 'POST',

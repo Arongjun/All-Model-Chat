@@ -37,23 +37,26 @@
 
 ## 项目简介
 
-**阿荣AI工作站** 是基于 All Model Chat 原型继续扩展的全能 AI 聊天工作站。它不再限定为单一 Gemini 客户端，而是面向生产部署补齐了 OpenAI-compatible、Anthropic-compatible、自建中转、GPT/DALL-E 生图、多用户账号、积分额度、模型次数包、兑换码、充值订单和 SQLite 持久化能力。
+**阿荣AI工作站** 是基于 All Model Chat 原型继续扩展的全能 AI 聊天工作站。它不再限定为单一 Gemini 客户端，而是面向生产部署补齐了 OpenAI-compatible、Anthropic-compatible、OpenRouter、MiniMax、小米 MiMo/自建 Codex 中转、GPT 生图、多用户账号、积分额度、模型次数包、兑换码、充值订单和 SQLite 持久化能力。
 
 当前仓库围绕 **Vite + React SPA** 作为唯一主线构建形态：
 - **标准模式**：本地通过 Vite 开发 / 构建，适合日常开发与静态部署
 - **Docker 部署模式**：`web + api` 双服务部署，前端走同源 `/api/*`，由后端统一代理模型、鉴权、额度扣减和后台配置
 - **静态前端 + 独立 API 模式**：前端部署到 Pages/CDN，后端单独托管 Node API 服务
 
+云端聊天记录支持服务端 SQLite + S3 兼容对象存储：文本会话、分组和附件索引按用户隔离保存在服务器，图片/文件原件可接 MinIO、Cloudflare R2、AWS S3 或其它兼容网关。常用部署、对象存储和后台治理说明已尽量集中写在本 README。
+
 ---
 
 ## 核心功能
 
 ### 深度推理 (Thinking)
-- 支持 Gemini 3.0 / 3.1 / 2.5 系列模型的思维链可视化
-- 可设置 **Token 预算** 或 **推理等级** (Minimal / Low / Medium / High)
-- 实时查看 AI 的逻辑演算过程
+- Gemini/Gemma 原生模型支持返回的思考片段与推理摘要展示，可按模型使用 **Token 预算** 或 **推理等级** (Minimal / Low / Medium / High)
+- OpenAI-compatible 推理模型（例如 OpenAI/Codex 类 `gpt-5*`、`o*`、`gpt-oss*`）会把推理等级映射为上游支持的 `reasoning_effort`
+- MiniMax OpenAI-compatible 直连模型会自动附带 `reasoning_split`，如果上游返回 `reasoning_content`、`reasoning` 或 `reasoning_details`，工作站会展示为思考内容
+- OpenRouter 或其它网关可以正常聊天和同步模型；推理展示取决于网关是否返回兼容字段，项目不会承诺展示模型未返回的原始思维链
 
-### 实时音视频 (Live API)
+### Gemini 实时音视频 (Live API)
 - 双向实时流式交互，支持语音通话
 - 屏幕共享与视觉识别
 - 音频可视化 (AudioWorklet API)
@@ -72,8 +75,8 @@
 - 文件分辨率可调（Low / Medium / High / Ultra）
 
 ### 生产力工具链
-- **深度搜索**：聚合 Google Search，自动规划搜索任务并提供精准引用
-- **URL 上下文**：自动抓取 URL 内容作为对话上下文
+- **深度搜索**：Gemini 原生聚合 Google Search；其它 OpenAI-compatible 模型仍可正常聊天，若需要联网搜索可后续接入对应工具或中转能力
+- **URL 上下文**：Gemini 原生 URL Context；其它兼容模型会保留基础文本/附件上下文
 - **本地 Python 沙箱**：基于 Pyodide (WASM) 的浏览器端 Python 运行环境
   - 预装 numpy、pandas、matplotlib、scipy、scikit-learn 等科学计算库
   - 自动检测代码依赖并安装
@@ -81,16 +84,16 @@
   - matplotlib 图表自动捕获输出
 - **TTS 语音合成**：30+ 种语音可选
 - **语音转录**：支持多种 Gemini 模型进行语音转文字
-- **Imagen 4.0 图片生成**：支持 Fast / Standard / Ultra 三档，可配置宽高比与尺寸
+- **图片生成**：支持 Imagen 4.0 Fast / Standard / Ultra；OpenAI-compatible 生图代理仅提供 `gpt-image-1`、`gpt-image-1.5`、`gpt-image-2`，并按官方尺寸限制为 `auto` 或 1K（`1024x1024`、`1536x1024`、`1024x1536`）
 
 ### 企业级 API 管理
-- **多供应商接入**：支持 Gemini、OpenAI-compatible、Anthropic-compatible 与自建中转 Base URL
+- **多供应商接入**：支持 Gemini、OpenAI-compatible、Anthropic-compatible 与自建中转 Base URL；OpenAI-compatible 可填 OpenAI 官方、OpenRouter、MiniMax、小米 MiMo 兼容网关或你自己的 Codex 中转站
 - **后台 API 配置**：管理员可在工作站后台维护 API Key/Base URL，SQLite 配置优先于环境变量
 - **服务端代理**：前端默认不持有真实密钥，聊天、生图和 Live token 通过后端代理统一处理
 
 ### 工作站运营能力
 - **多用户账号**：支持管理员和普通用户，管理员可创建、停用和调整用户额度
-- **积分与次数包**：可按模型规则扣积分，也可为 `gpt-image-*` 等模型发放指定次数
+- **积分与次数包**：可按模型规则扣积分，也可为 `gpt-image-2` 等指定模型发放指定次数
 - **兑换码与充值订单**：支持兑换码充值、人工确认充值订单和完整用量审计
 - **SQLite 持久化**：用户、额度、订单、API 配置和审计记录保存在服务端 SQLite 数据库
 
@@ -179,6 +182,7 @@ docker compose up -d --build
 - `web` 镜像会在 Docker 内执行前端生产构建，不需要提前上传 `dist/`。
 - SQLite 数据保存在 `workspace-data` 命名卷，不要删除该卷。
 - 更详细的 1Panel 部署步骤见 [docs/deployment/1panel-docker.md](docs/deployment/1panel-docker.md)。
+- 如果你是手动打包上传服务器，上传/排除清单见下方“服务器上传清单”；更细清单见 [docs/deployment/upload-checklist.md](docs/deployment/upload-checklist.md)。
 
 > ⚠️ 安全边界说明
 > 当前工作站已经具备账号、额度和审计能力，但正式对公网运营时仍建议叠加 HTTPS、反向代理限流、备份策略和管理员强密码。
@@ -190,11 +194,11 @@ docker compose up -d --build
 | 变量名 | 用途 | 公开性 | 默认值 |
 | :--- | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | Gemini 密钥，可作为后台配置的启动兜底 | **仅服务端** | 空 |
-| `OPENAI_API_KEY` | OpenAI-compatible 密钥，可用于 GPT、DeepSeek、Qwen、自建中转和 GPT/DALL-E 生图 | **仅服务端** | 空 |
+| `OPENAI_API_KEY` | OpenAI-compatible 密钥，可用于 GPT/Codex API 模型、OpenRouter、MiniMax、小米 MiMo 兼容网关、自建中转和 GPT 生图 | **仅服务端** | 空 |
 | `ANTHROPIC_API_KEY` | Anthropic-compatible 密钥，可用于 Claude `/v1/messages` 路由 | **仅服务端** | 空 |
 | `PORT` | `api` 服务监听端口 | 仅服务端 | `3001` |
 | `GEMINI_API_BASE` | Gemini 上游地址（代理目标） | 仅服务端 | `https://generativelanguage.googleapis.com` |
-| `OPENAI_API_BASE` | OpenAI-compatible 上游地址 | 仅服务端 | `https://api.openai.com/v1` |
+| `OPENAI_API_BASE` | OpenAI-compatible 上游地址，可填 OpenAI 官方、OpenRouter、MiniMax、小米 MiMo 兼容网关或自建 Codex 中转站 | 仅服务端 | `https://api.openai.com/v1` |
 | `ANTHROPIC_API_BASE` | Anthropic-compatible 上游地址 | 仅服务端 | `https://api.anthropic.com` |
 | `ALLOWED_ORIGINS` | 逗号分隔 CORS 白名单（跨域部署时使用） | 仅服务端 | 空 |
 | `WORKSPACE_DATABASE_FILE` | SQLite 数据库路径 | 仅服务端 | `server/data/arong-workspace.sqlite` |
@@ -209,6 +213,92 @@ docker compose up -d --build
 - API Key 可以先放环境变量作为兜底，也可以部署完成后在管理员后台“模型 API 配置”里填写；后台 SQLite 配置优先于环境变量。
 - 后台支持“一键从环境变量导入”，但不会反向改写 Docker/1Panel 环境变量，也不会把完整密钥回显给浏览器。
 - 前端在部署时默认依赖后端端点：`/api/gemini/*`、`/api/openai/*`、`/api/anthropic/*` 与 `/api/live-token`。
+
+### 服务器上传清单
+
+用 1Panel / Docker 部署时，建议上传“源码 + Docker 配置”，不要上传本地依赖和构建产物。
+
+必须上传：
+- `src/`、`server/`、`public/`、`docker/`、`scripts/`
+- `package.json`、`package-lock.json`、`.npmrc`
+- `Dockerfile.web`、`Dockerfile.api`、`docker-compose.yml`
+- `index.html`、`manifest.json`、`vite.config.ts`、`tsconfig.json`、`vitest.config.ts`、`eslint.config.js`
+- `.env.example`、`.dockerignore`、`.gitignore`、`README.md`
+
+不需要上传：
+- `node_modules/`、`dist/`、`server/dist/`
+- `playwright-report/`、`test-results/`、`coverage/`
+- `*.log`、`*.err.log`
+- `.env`、`.env.local`、`.env.*` 这类真实密钥文件
+- `.git/`，如果不是通过 Git 拉取部署，打包上传时可不带
+
+不能随便删：
+- 服务器 Docker 命名卷 `workspace-data`，它保存 `/app/server/data/arong-workspace.sqlite`。
+- 生产环境里的真实密钥和后台下载的 JSON 备份，这些都属于敏感数据。
+
+### 云端聊天记录与对象存储
+
+登录用户的云端聊天采用“SQLite 记录 + S3 兼容对象存储附件”的结构：
+
+- SQLite 保存用户账号、登录态、积分、次数包、兑换码、邀请码、充值订单、审计记录、聊天会话、分组和附件索引。
+- 对象存储保存聊天里上传的图片、文档、音频等原始文件。
+- 浏览器 IndexedDB 仍作为本机缓存，未登录或对象存储未配置时不会破坏原来的本地体验。
+- 每个用户只能访问自己的云端会话和附件，服务端下载附件时会校验登录态和归属关系。
+- 不会同步明文 API Key、浏览器临时 Blob 地址、AbortController、上传速度等临时字段。
+
+推荐的 1Panel / Docker + MinIO 配置：
+
+- Endpoint：`http://minio:9000`
+- Bucket：例如 `arong-ai`
+- Region：`auto`
+- Access Key ID：MinIO 用户名
+- Secret Access Key：MinIO 密钥
+- 使用路径风格地址：开启
+- 对象前缀：`arong-ai-workstation/cloud-chat`
+- 公开访问前缀：可先留空，默认通过应用服务端鉴权下载
+
+对象存储也可以用环境变量作为首次启动兜底，部署后再到管理员后台修改：
+
+```env
+OBJECT_STORAGE_ENABLED=false
+OBJECT_STORAGE_ENDPOINT=
+OBJECT_STORAGE_REGION=auto
+OBJECT_STORAGE_BUCKET=
+OBJECT_STORAGE_ACCESS_KEY_ID=
+OBJECT_STORAGE_SECRET_ACCESS_KEY=
+OBJECT_STORAGE_FORCE_PATH_STYLE=true
+OBJECT_STORAGE_PUBLIC_BASE_URL=
+OBJECT_STORAGE_PREFIX=arong-ai-workstation/cloud-chat
+```
+
+后台对象存储配置优先于环境变量；后台清空后，会自动回退环境变量。
+
+未配置对象存储时：
+- 登录用户的文本聊天记录和分组仍会同步到 SQLite。
+- 附件不会上传到对象存储，会继续保存在当前浏览器本地缓存。
+- 换设备后可以看到聊天文本，但看不到只存在原设备本地缓存里的附件原文件。
+
+删除和清理策略：
+- 删除云端会话时，服务端会软删除会话，并标记关联附件不可访问。
+- 如果对象存储可用，服务端会最佳努力删除对应 S3 对象，降低存储成本和隐私残留。
+- 管理员后台支持按用户查看会话、查看某个会话内容、批量删除会话、按文件名搜索附件、批量删除附件。
+- 对象存储清理支持“先试算、再执行”，可按附件年龄和总容量上限控制费用。
+- 启用自动清理后，服务端会在应用访问时至多每天触发一次保守清理；清理失败不会影响聊天可用性。
+
+### 后台运营治理
+
+管理员后台除了账号、额度、兑换码和订单外，还提供两类运营能力：
+
+- 云端记录与存储治理：查看用户云端会话、定位附件、批量删除、单文件删除、配置对象存储清理策略。
+- 系统预设场景运营：新增、编辑、删除全站提示词，可设置启用/停用、排序和可见范围。
+
+系统预设场景的可见范围支持：
+- 所有人可见
+- 登录成员可见
+- 仅管理员可见
+- 指定用户可见
+
+普通用户打开场景面板时，只会看到自己有权限访问的系统预设；用户自己的自定义场景仍保存在个人本地缓存，不会被系统预设覆盖。
 
 ### 方式三：Cloudflare Pages（静态前端）+ 独立 API 服务
 
@@ -324,7 +414,7 @@ arong-ai-workstation/
 │   └── tsconfig.json
 ├── public/                     # 静态资源与 runtime-config.js 模板
 ├── e2e/                        # Playwright 端到端测试
-├── docs/                       # 计划、规范与文档
+├── docs/                       # 补充文档；README 是主入口，docs 仅放长部署细节/架构记录
 ├── docker/                     # 部署辅助脚本
 ├── vite.config.ts              # Vite 配置（React、静态复制、手工分包）
 ├── playwright.config.ts        # E2E 配置
@@ -337,14 +427,32 @@ arong-ai-workstation/
 
 ---
 
+## 补充文档入口
+
+日常部署和使用优先看本 README。确实不适合塞进 README 的长文档，入口统一放这里：
+
+- [1Panel Docker 部署指南](docs/deployment/1panel-docker.md)：更细的 1Panel 编排、环境变量、反向代理和冒烟测试。
+- [服务器上传清单](docs/deployment/upload-checklist.md)：打包上传时哪些要传、哪些不要传、哪些不能删。
+- `docs/adr/`：架构决策记录，主要给后续开发维护时回看设计取舍。
+- `docs/plans/` 和 `docs/superpowers/`：历史开发计划和规格记录，不是部署必读文档。
+
+---
+
 ## 支持的模型
 
 模型不是写死为 README 里的几项。内置模型目录只是开箱即用的推荐项，实际可以接入：
 
 - **Gemini 原生模型**：走 `/api/gemini/*`，支持 Gemini、Gemma、Imagen、Live API 等能力。
-- **OpenAI-compatible 模型**：走 `/api/openai/*`，可接 GPT、DeepSeek、Qwen、Kimi、Moonshot、GLM、自建中转等兼容接口。
-- **OpenAI 生图模型**：`gpt-image-*`、`dall-e-*` 等走 OpenAI-compatible 生图代理，可按积分或指定次数包计费。
+- **OpenAI-compatible 模型**：走 `/api/openai/*`，可接 ChatGPT/OpenAI API 模型、Codex API 模型、DeepSeek、Qwen、Kimi、Moonshot、GLM、OpenRouter、MiniMax、小米 MiMo 兼容网关和自建中转站。
+- **OpenAI 生图模型**：内置仅提供 `gpt-image-1`、`gpt-image-1.5`、`gpt-image-2`，走 OpenAI-compatible 生图代理，可按积分或指定次数包计费；官方接口支持 `auto` 或 1K 尺寸档，对应 `1024x1024`、`1536x1024`、`1024x1536`。
 - **Anthropic-compatible 模型**：走 `/api/anthropic/*`，支持 Claude 官方或兼容 `/v1/messages` 的网关。
+
+OpenAI-compatible 接入规则很简单：
+
+- Base URL 填到服务商的 OpenAI 兼容根地址，例如 OpenAI 官方 `https://api.openai.com/v1`、OpenRouter `https://openrouter.ai/api/v1`，或 MiniMax/小米 MiMo/自建 Codex 中转站在控制台提供的兼容地址。
+- 上游需要兼容 `/v1/chat/completions` 才能聊天；需要兼容 `/v1/models` 才能在后台“同步模型”里自动发现模型。
+- 如果上游没有 `/v1/models`，仍可在模型列表里手动添加模型 ID；如果上游不是 OpenAI-compatible 协议，则需要后续单独写 provider adapter。
+- 推理展示不是 Gemini 专属：OpenAI-compatible 返回 `reasoning_content`、`reasoning`、`reasoning_details` 时会展示；OpenAI/Codex 类推理模型会转发 `reasoning_effort`，MiniMax 直连模型会转发 `reasoning_split`。
 
 ---
 

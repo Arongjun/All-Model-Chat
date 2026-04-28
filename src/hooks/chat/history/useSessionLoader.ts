@@ -7,6 +7,11 @@ import { cleanupFilePreviewUrls } from '../../../utils/fileHelpers';
 import { resolveSupportedModelId } from '../../../utils/modelHelpers';
 import { dbService } from '../../../utils/db';
 import type { SetActiveSessionOptions } from '../../../stores/chatStore';
+import {
+    getGroupsFromCloudOrLocal,
+    getSessionFromCloudOrLocal,
+    getSessionMetadataFromCloudOrLocal,
+} from '../../../services/chatSessionPersistence';
 
 type SessionLoaderHistoryOptions = Pick<SetActiveSessionOptions, 'history'>;
 
@@ -187,7 +192,7 @@ export const useSessionLoader = ({
         }
 
         try {
-            const sessionToLoad = await dbService.getSession(sessionId);
+            const sessionToLoad = await getSessionFromCloudOrLocal(sessionId);
 
             if (requestId !== sessionViewRequestIdRef.current) {
                 return;
@@ -241,8 +246,8 @@ export const useSessionLoader = ({
             
             // 1. Fetch metadata only for the list
             const [metadataList, groups] = await Promise.all([
-                dbService.getAllSessionMetadata(),
-                dbService.getAllGroups()
+                getSessionMetadataFromCloudOrLocal(),
+                getGroupsFromCloudOrLocal()
             ]);
 
             // Determine Active Session ID
@@ -261,7 +266,7 @@ export const useSessionLoader = ({
 
             // 2. Fetch Active Session Full Data if exists
             if (initialActiveId) {
-                const fullActiveSession = await dbService.getSession(initialActiveId);
+                const fullActiveSession = await getSessionFromCloudOrLocal(initialActiveId);
                 if (fullActiveSession) {
                     logService.info(`Loaded full content for active session: ${initialActiveId}`);
                     const rehydrated = rehydrateSessionFiles(sanitizeSessionModel(fullActiveSession));
@@ -320,7 +325,7 @@ export const useSessionLoader = ({
                 if (mostRecent) {
                     // We need to verify if it's truly empty. Metadata has messages stripped.
                     // Also check systemInstruction: if it's a specific scenario, don't reuse it as a generic "New Chat"
-                    const fullSession = await dbService.getSession(mostRecent.id);
+                    const fullSession = await getSessionFromCloudOrLocal(mostRecent.id);
                     if (fullSession && fullSession.messages.length === 0 && !fullSession.settings.systemInstruction) {
                         logService.info(`Reusing empty recent session: ${mostRecent.id}`);
                         const rehydrated = rehydrateSessionFiles(sanitizeSessionModel(fullSession));

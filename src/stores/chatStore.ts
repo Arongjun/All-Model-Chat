@@ -4,6 +4,14 @@ import type { SyncMessage } from '../types/sync';
 import type { ImageOutputMode, ImagePersonGeneration } from '../types/settings';
 import { dbService } from '../utils/db';
 import { logService } from '../services/logService';
+import {
+  deleteSessionFromLocalAndCloud,
+  getGroupsFromCloudOrLocal,
+  getSessionFromCloudOrLocal,
+  getSessionMetadataFromCloudOrLocal,
+  saveGroupsToLocalAndCloud,
+  saveSessionToLocalAndCloud,
+} from '../services/chatSessionPersistence';
 import { rehydrateSessionFiles } from '../utils/chat/session';
 import { resolveSupportedModelId } from '../utils/modelHelpers';
 import { ACTIVE_CHAT_SESSION_ID_KEY } from '../constants/appConstants';
@@ -293,7 +301,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   // ── Persistence Actions ──
   refreshSessions: async () => {
     try {
-      const metadataList = await dbService.getAllSessionMetadata();
+      const metadataList = await getSessionMetadataFromCloudOrLocal();
       const {
         activeSessionId,
         loadingSessionIds,
@@ -302,7 +310,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       } = get();
 
       if (activeSessionId && !loadingSessionIds.has(activeSessionId)) {
-        const fullActiveSession = await dbService.getSession(activeSessionId);
+        const fullActiveSession = await getSessionFromCloudOrLocal(activeSessionId);
         if (fullActiveSession) {
           const rehydrated = rehydrateSessionFiles(sanitizeSessionModel(fullActiveSession));
           setActiveMessages(rehydrated.messages);
@@ -350,7 +358,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
   refreshGroups: async () => {
     try {
-      const groups = await dbService.getAllGroups();
+      const groups = await getGroupsFromCloudOrLocal();
       set({ savedGroups: groups });
     } catch (e) {
       logService.error('Failed to refresh groups from DB', { error: e });
@@ -444,7 +452,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
                 return session;
               }
 
-              const persistedSession = await dbService.getSession(session.id);
+              const persistedSession = await getSessionFromCloudOrLocal(session.id);
               if (version !== undefined && _sessionPersistVersion.get(session.id) !== version) {
                 return null;
               }
@@ -471,13 +479,25 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
                 return;
               }
 
-              await dbService.saveSession(session);
+              const savedSession = await saveSessionToLocalAndCloud(session);
 
               if (version !== undefined && _sessionPersistVersion.get(session.id) === version) {
                 persistedSessionIds.add(session.id);
+                if (savedSession !== session) {
+                  set((state) => ({
+                    activeMessages: state.activeSessionId === savedSession.id
+                      ? savedSession.messages
+                      : state.activeMessages,
+                    savedSessions: state.savedSessions.map((existingSession) =>
+                      existingSession.id === savedSession.id
+                        ? { ...existingSession, ...savedSession, messages: existingSession.messages }
+                        : existingSession,
+                    ),
+                  }));
+                }
               }
             }),
-            ...deletedSessionIds.map((id) => dbService.deleteSession(id)),
+            ...deletedSessionIds.map((id) => deleteSessionFromLocalAndCloud(id)),
           ]);
 
           if (
@@ -508,7 +528,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   updateAndPersistGroups: (updater) => {
     const { savedGroups } = get();
     const newGroups = updater(savedGroups);
-    dbService.setAllGroups(newGroups)
+    saveGroupsToLocalAndCloud(newGroups)
       .then(() => broadcast({ type: 'GROUPS_UPDATED' }))
       .catch(e => logService.error('Failed to persist group updates', { error: e }));
     set({ savedGroups: newGroups });
@@ -565,7 +585,7 @@ if (typeof BroadcastChannel !== 'undefined') {
         }
         const { activeSessionId } = store.getState();
         if (msg.sessionId === activeSessionId) {
-          dbService.getSession(msg.sessionId).then(s => {
+          getSessionFromCloudOrLocal(msg.sessionId).then(s => {
             if (s) {
               const rehydrated = rehydrateSessionFiles(s);
               store.getState().setActiveMessages(rehydrated.messages);

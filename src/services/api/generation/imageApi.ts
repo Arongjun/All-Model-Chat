@@ -9,33 +9,46 @@ import {
     DEFAULT_OPENAI_API_BASE_URL,
     deriveSiblingProviderProxyUrl,
 } from '../../../utils/apiProxyUrl';
-import { isOpenAiImageModel, normalizeAspectRatioForModel, normalizeImageSizeForModel } from '../../../utils/modelHelpers';
+import {
+    isOpenAiImageModel,
+    normalizeAspectRatioForModel,
+    normalizeImageSizeForModel,
+    stripModelProviderPrefix,
+} from '../../../utils/modelHelpers';
 
 const OPENAI_IMAGE_SIZE_PRESETS: Record<string, Record<string, string>> = {
     '1K': {
         '1:1': '1024x1024',
-        '16:9': '1536x864',
-        '9:16': '864x1536',
-        '4:3': '1280x960',
-        '3:4': '960x1280',
-    },
-    '2K': {
-        '1:1': '2048x2048',
-        '16:9': '2048x1152',
-        '9:16': '1152x2048',
-        '4:3': '2048x1536',
-        '3:4': '1536x2048',
-    },
-    '4K': {
-        '1:1': '2880x2880',
-        '16:9': '3840x2160',
-        '9:16': '2160x3840',
-        '4:3': '3200x2400',
-        '3:4': '2400x3200',
+        '3:2': '1536x1024',
+        '2:3': '1024x1536',
     },
 };
 
 const OPENAI_DEFAULT_IMAGE_SIZE = OPENAI_IMAGE_SIZE_PRESETS['1K']['1:1'];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null;
+
+const readProviderErrorMessage = (payload: unknown): string | null => {
+    if (!isRecord(payload)) {
+        return null;
+    }
+
+    const error = payload.error;
+    if (typeof error === 'string' && error.trim()) {
+        return error.trim();
+    }
+
+    if (isRecord(error) && typeof error.message === 'string' && error.message.trim()) {
+        return error.message.trim();
+    }
+
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+        return payload.message.trim();
+    }
+
+    return null;
+};
 
 const resolveOpenAiImagesEndpoint = async (
     apiKey: string,
@@ -73,12 +86,33 @@ const resolveOpenAiImageSize = (
     aspectRatio: string | undefined,
     imageSize: string | undefined,
 ): string => {
+    if (imageSize?.toLowerCase() === 'auto') {
+        return 'auto';
+    }
+
     const normalizedImageSize = imageSize && OPENAI_IMAGE_SIZE_PRESETS[imageSize] ? imageSize : '1K';
     const normalizedAspectRatio = aspectRatio && OPENAI_IMAGE_SIZE_PRESETS[normalizedImageSize][aspectRatio]
         ? aspectRatio
         : '1:1';
 
     return OPENAI_IMAGE_SIZE_PRESETS[normalizedImageSize][normalizedAspectRatio] || OPENAI_DEFAULT_IMAGE_SIZE;
+};
+
+const normalizeOpenAiImageAspectRatio = (aspectRatio: string | undefined): string => {
+    if (aspectRatio === '3:2' || aspectRatio === '2:3' || aspectRatio === '1:1') {
+        return aspectRatio;
+    }
+
+    // Keep legacy saved ratios close to the official GPT Image API sizes.
+    if (aspectRatio === '16:9' || aspectRatio === '4:3') {
+        return '3:2';
+    }
+
+    if (aspectRatio === '9:16' || aspectRatio === '3:4') {
+        return '2:3';
+    }
+
+    return '1:1';
 };
 
 const extractOpenAiImages = (payload: unknown): string[] => {
@@ -97,13 +131,10 @@ const extractOpenAiImages = (payload: unknown): string[] => {
 
 const getOpenAiErrorMessage = async (response: Response): Promise<string> => {
     try {
-        const payload = await response.json() as {
-            error?: {
-                message?: string;
-            };
-        };
-        if (payload?.error?.message) {
-            return payload.error.message;
+        const payload = await response.json();
+        const providerErrorMessage = readProviderErrorMessage(payload);
+        if (providerErrorMessage) {
+            return providerErrorMessage;
         }
     } catch {
         // Fall back to plain text response handling below.
@@ -131,13 +162,13 @@ const generateOpenAiImages = async (
     options: GenerateImagesRequestOptions = {},
 ): Promise<string[]> => {
     const { headers, url } = await resolveOpenAiImagesEndpoint(apiKey);
-    const normalizedAspectRatio = normalizeAspectRatioForModel(modelId, aspectRatio) || '1:1';
+    const normalizedAspectRatio = normalizeOpenAiImageAspectRatio(aspectRatio);
     const normalizedImageSize = normalizeImageSizeForModel(modelId, imageSize) || '1K';
     const response = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-            model: modelId,
+            model: stripModelProviderPrefix(modelId),
             prompt,
             n: options.numberOfImages ?? 1,
             output_format: 'png',

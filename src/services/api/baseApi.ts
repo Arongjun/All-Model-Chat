@@ -8,6 +8,8 @@ import {
   isGemini3Model,
   isGeminiRoboticsModel,
   isGemmaModel,
+  isMiniMaxOpenAiReasoningSplitModel,
+  isOpenAiReasoningEffortModel,
   normalizeAspectRatioForModel,
   normalizeImageSizeForModel,
 } from '../../utils/modelHelpers';
@@ -23,6 +25,21 @@ const IMAGE_TEXT_MODALITIES = ['IMAGE', 'TEXT'] as const;
 const IMAGE_ONLY_MODALITIES = ['IMAGE'] as const;
 const toGeminiPersonGeneration = (personGeneration: ImagePersonGeneration): 'ALLOW_ADULT' | 'ALLOW_ALL' | 'ALLOW_NONE' =>
   personGeneration === 'DONT_ALLOW' ? 'ALLOW_NONE' : personGeneration;
+const toOpenAiReasoningEffort = (
+    thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH',
+): 'low' | 'medium' | 'high' => {
+    switch (thinkingLevel) {
+        case 'LOW':
+            return 'low';
+        case 'MEDIUM':
+            return 'medium';
+        case 'MINIMAL':
+            return 'low';
+        case 'HIGH':
+        default:
+            return 'high';
+    }
+};
 
 export { POLLING_INTERVAL_MS, MAX_POLLING_DURATION_MS };
 
@@ -50,6 +67,8 @@ type GenerationConfig = {
     thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
     thinkingBudget?: number;
   };
+  openAiReasoningEffort?: 'low' | 'medium' | 'high';
+  openAiReasoningSplit?: boolean;
   tools?: Array<
     | {
         googleSearch: {
@@ -435,6 +454,14 @@ export const buildGenerationConfig = async (
 
     if (!generationConfig.systemInstruction) {
         delete generationConfig.systemInstruction;
+    }
+
+    if (thinkingBudget !== 0 && isOpenAiReasoningEffortModel(modelId)) {
+        generationConfig.openAiReasoningEffort = toOpenAiReasoningEffort(thinkingLevel);
+    }
+
+    if (isMiniMaxOpenAiReasoningSplitModel(modelId)) {
+        generationConfig.openAiReasoningSplit = true;
     }
 
     // Robust check for Gemini 3

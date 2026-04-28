@@ -62,7 +62,7 @@ export const useAppEvents = ({
     // PWA Installation Handlers
     useEffect(() => {
         const handleBeforeInstallPrompt = (e: Event) => {
-            e.preventDefault();
+            // Do not preventDefault here; Chrome logs a warning when the native install banner is suppressed.
             logService.info('PWA install prompt available.');
             const nextPromptEvent = e as BeforeInstallPromptEvent;
             setInstallPromptEvent(nextPromptEvent);
@@ -158,16 +158,22 @@ export const useAppEvents = ({
 
     const handleInstallPwa = async () => {
         if (installState.state === 'available' && installPromptEvent) {
-            installPromptEvent.prompt();
-            const { outcome } = await installPromptEvent.userChoice;
-            logService.info(`PWA install prompt outcome: ${outcome}`);
-            setInstallPromptEvent(null);
-            setInstallState(
-              getPwaInstallState({
-                installPromptEvent: null,
-                win: window,
-              }),
-            );
+            try {
+                await installPromptEvent.prompt();
+                const { outcome } = await installPromptEvent.userChoice;
+                logService.info(`PWA install prompt outcome: ${outcome}`);
+            } catch (error) {
+                logService.warn('PWA install prompt could not be shown; falling back to manual instructions.', { error });
+                window.alert(getManualInstallMessage(appSettings.language));
+            } finally {
+                setInstallPromptEvent(null);
+                setInstallState(
+                  getPwaInstallState({
+                    installPromptEvent: null,
+                    win: window,
+                  }),
+                );
+            }
             return;
         }
 

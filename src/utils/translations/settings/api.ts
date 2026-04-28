@@ -4,7 +4,7 @@ export const apiSettings = {
     settingsApiKey: { en: 'Gemini API Keys', zh: 'Gemini API 密钥' },
     settingsApiKeyHelpText: { en: 'You can enter multiple keys, one per line. A key will be used in rotation for each new chat session.', zh: '您可以输入多个密钥，每行一个。每个新聊天会话将轮流使用一个密钥。' },
     settingsOpenAiApiKey: { en: 'OpenAI-Compatible API Keys', zh: 'OpenAI 兼容 API 密钥' },
-    settingsOpenAiApiKeyHelpText: { en: 'Used by non-Gemini chat models and GPT/DALL-E image models. You can enter multiple keys, one per line, and they rotate separately from Gemini keys.', zh: '供非 Gemini 聊天模型以及 GPT / DALL-E 生图模型使用。您可以每行输入一个密钥，并与 Gemini 密钥分开轮换。' },
+    settingsOpenAiApiKeyHelpText: { en: 'Used by non-Gemini chat models and supported GPT image models. You can enter multiple keys, one per line, and they rotate separately from Gemini keys.', zh: '供非 Gemini 聊天模型以及已支持的 GPT 生图模型使用。您可以每行输入一个密钥，并与 Gemini 密钥分开轮换。' },
     settingsAnthropicApiKey: { en: 'Anthropic-Compatible API Keys', zh: 'Anthropic 兼容 API 密钥' },
     settingsAnthropicApiKeyHelpText: { en: 'Used by Claude and Anthropic-compatible /v1/messages models. You can enter multiple keys, one per line, and they rotate separately from Gemini/OpenAI keys.', zh: '供 Claude 以及 Anthropic 兼容 /v1/messages 模型使用。您可以每行输入一个密钥，并与 Gemini / OpenAI 密钥分开轮换。' },
     apiConfig_default_info: { en: 'Using API settings from the environment. Turn this on to override them.', zh: '当前正在使用环境中的 API 设置。打开此项可手动覆盖。' },

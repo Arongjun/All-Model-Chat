@@ -10,6 +10,15 @@ export interface ApiServerConfig {
   workspaceDatabaseFilePath: string;
   workspaceLegacyJsonFilePath?: string;
   workspaceSessionTtlHours: number;
+  objectStorageEnabled: boolean;
+  objectStorageEndpoint?: string;
+  objectStorageRegion?: string;
+  objectStorageBucket?: string;
+  objectStorageAccessKeyId?: string;
+  objectStorageSecretAccessKey?: string;
+  objectStorageForcePathStyle: boolean;
+  objectStoragePublicBaseUrl?: string;
+  objectStoragePrefix?: string;
 }
 
 interface EnvLike {
@@ -61,6 +70,14 @@ function parsePositiveInteger(rawValue: string | undefined, fallback: number): n
   return parsed;
 }
 
+function parseBoolean(rawValue: string | undefined, fallback = false): boolean {
+  if (!rawValue) {
+    return fallback;
+  }
+
+  return ['1', 'true', 'yes', 'on'].includes(rawValue.trim().toLowerCase());
+}
+
 export function loadConfig(env: EnvLike = process.env): ApiServerConfig {
   return {
     port: parsePort(env.PORT),
@@ -77,5 +94,14 @@ export function loadConfig(env: EnvLike = process.env): ApiServerConfig {
       env.WORKSPACE_SESSION_TTL_HOURS,
       DEFAULT_WORKSPACE_SESSION_TTL_HOURS,
     ),
+    objectStorageEnabled: parseBoolean(env.OBJECT_STORAGE_ENABLED, false),
+    objectStorageEndpoint: env.OBJECT_STORAGE_ENDPOINT?.trim() || undefined,
+    objectStorageRegion: env.OBJECT_STORAGE_REGION?.trim() || undefined,
+    objectStorageBucket: env.OBJECT_STORAGE_BUCKET?.trim() || undefined,
+    objectStorageAccessKeyId: env.OBJECT_STORAGE_ACCESS_KEY_ID?.trim() || undefined,
+    objectStorageSecretAccessKey: env.OBJECT_STORAGE_SECRET_ACCESS_KEY?.trim() || undefined,
+    objectStorageForcePathStyle: parseBoolean(env.OBJECT_STORAGE_FORCE_PATH_STYLE, true),
+    objectStoragePublicBaseUrl: env.OBJECT_STORAGE_PUBLIC_BASE_URL?.trim() || undefined,
+    objectStoragePrefix: env.OBJECT_STORAGE_PREFIX?.trim() || undefined,
   };
 }

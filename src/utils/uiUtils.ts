@@ -50,11 +50,33 @@ export const applyThemeToDocument = (doc: Document, theme: Theme, settings: AppS
     themeVariablesStyleTag.innerHTML = generateThemeCssVariables(theme.colors);
   }
 
+  const browserChromeColor = theme.colors.bgPrimary || theme.colors.bgSecondary;
+  const colorScheme = theme.id === 'onyx' ? 'dark' : 'light';
+
   const bodyClassList = doc.body.classList;
   AVAILABLE_THEMES.forEach(t => bodyClassList.remove(`theme-${t.id}`));
   bodyClassList.add(`theme-${theme.id}`, 'antialiased');
 
+  let themeColorMeta = doc.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (!themeColorMeta && doc.head) {
+    themeColorMeta = doc.createElement('meta');
+    themeColorMeta.name = 'theme-color';
+    doc.head.appendChild(themeColorMeta);
+  }
+  themeColorMeta?.setAttribute('content', browserChromeColor);
+
+  const appleStatusBarMeta = doc.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]');
+  appleStatusBarMeta?.setAttribute('content', theme.id === 'onyx' ? 'black-translucent' : 'default');
+
+  doc.documentElement.style.backgroundColor = browserChromeColor;
+  doc.documentElement.style.colorScheme = colorScheme;
+  doc.body.style.backgroundColor = browserChromeColor;
   doc.body.style.fontSize = `${settings.baseFontSize}px`;
+
+  const root = doc.getElementById('root');
+  if (root) {
+    root.style.backgroundColor = browserChromeColor;
+  }
 };
 
 export const showNotification = async (title: string, options?: NotificationOptions) => {

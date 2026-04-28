@@ -60,6 +60,8 @@ type OpenAiCompatibleGenerationConfig = {
     topP?: number;
     systemInstruction?: string;
     responseMimeType?: string;
+    openAiReasoningEffort?: 'low' | 'medium' | 'high';
+    openAiReasoningSplit?: boolean;
 };
 
 type OpenAiUsagePayload = {
@@ -74,6 +76,7 @@ type OpenAiChoiceMessage = {
     content?: unknown;
     reasoning_content?: unknown;
     reasoning?: unknown;
+    reasoning_details?: unknown;
 };
 
 type OpenAiResponsePayload = {
@@ -126,6 +129,27 @@ type AnthropicResponsePayload = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
+
+const readProviderErrorMessage = (payload: unknown): string | null => {
+    if (!isRecord(payload)) {
+        return null;
+    }
+
+    const error = payload.error;
+    if (typeof error === 'string' && error.trim()) {
+        return error.trim();
+    }
+
+    if (isRecord(error) && typeof error.message === 'string' && error.message.trim()) {
+        return error.message.trim();
+    }
+
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+        return payload.message.trim();
+    }
+
+    return null;
+};
 
 const mergeUniqueStrings = (existing: unknown, incoming: unknown): string[] | undefined => {
     const existingValues = Array.isArray(existing) ? existing.filter((value): value is string => typeof value === 'string') : [];
@@ -620,6 +644,14 @@ const buildOpenAiChatRequestBody = (
         body.response_format = { type: 'json_object' };
     }
 
+    if (openAiConfig.openAiReasoningEffort) {
+        body.reasoning_effort = openAiConfig.openAiReasoningEffort;
+    }
+
+    if (openAiConfig.openAiReasoningSplit) {
+        body.reasoning_split = true;
+    }
+
     return body;
 };
 
@@ -655,8 +687,9 @@ const buildAnthropicMessagesRequestBody = (
 const getOpenAiErrorMessage = async (response: Response): Promise<string> => {
     try {
         const payload = await response.json() as OpenAiResponsePayload;
-        if (payload?.error?.message) {
-            return payload.error.message;
+        const providerErrorMessage = readProviderErrorMessage(payload);
+        if (providerErrorMessage) {
+            return providerErrorMessage;
         }
     } catch {
         // Fall back to plain text response handling below.
@@ -677,8 +710,9 @@ const getOpenAiErrorMessage = async (response: Response): Promise<string> => {
 const getAnthropicErrorMessage = async (response: Response): Promise<string> => {
     try {
         const payload = await response.json() as AnthropicResponsePayload;
-        if (payload?.error?.message) {
-            return payload.error.message;
+        const providerErrorMessage = readProviderErrorMessage(payload);
+        if (providerErrorMessage) {
+            return providerErrorMessage;
         }
     } catch {
         // Fall back to plain text response handling below.
@@ -702,15 +736,37 @@ const extractOpenAiText = (content: unknown): string => {
     }
 
     if (Array.isArray(content)) {
-        return content
-            .map((item) => {
-                if (!item || typeof item !== 'object') return '';
-                const record = item as Record<string, unknown>;
-                if (typeof record.text === 'string') return record.text;
-                if (typeof record.output_text === 'string') return record.output_text;
-                return '';
-            })
-            .join('');
+        return content.map(extractOpenAiText).join('');
+    }
+
+    if (isRecord(content)) {
+        const fields = [
+            content.text,
+            content.output_text,
+            content.summary,
+            content.reasoning_content,
+            content.reasoning,
+            content.content,
+            content.delta,
+        ];
+
+        for (const field of fields) {
+            const text = extractOpenAiText(field);
+            if (text) {
+                return text;
+            }
+        }
+    }
+
+    return '';
+};
+
+const extractFirstOpenAiText = (...contents: unknown[]): string => {
+    for (const content of contents) {
+        const text = extractOpenAiText(content);
+        if (text) {
+            return text;
+        }
     }
 
     return '';
@@ -752,7 +808,11 @@ const sendOpenAiCompatibleMessageNonStream = async (
         const payload = await response.json() as OpenAiResponsePayload;
         const message = payload.choices?.[0]?.message;
         const text = extractOpenAiText(message?.content ?? payload.choices?.[0]?.text);
-        const thoughts = extractOpenAiText(message?.reasoning_content ?? message?.reasoning) || undefined;
+        const thoughts = extractFirstOpenAiText(
+            message?.reasoning_content,
+            message?.reasoning,
+            message?.reasoning_details,
+        ) || undefined;
         const responseParts = text ? [{ text }] : [];
 
         onComplete(responseParts, thoughts, mapOpenAiUsageMetadata(payload.usage), undefined, undefined);
@@ -843,7 +903,11 @@ const sendOpenAiCompatibleMessageStream = async (
 
                 const choice = payload.choices?.[0];
                 const text = extractOpenAiText(choice?.delta?.content ?? choice?.text);
-                const thoughts = extractOpenAiText(choice?.delta?.reasoning_content ?? choice?.delta?.reasoning);
+                const thoughts = extractFirstOpenAiText(
+                    choice?.delta?.reasoning_content,
+                    choice?.delta?.reasoning,
+                    choice?.delta?.reasoning_details,
+                );
 
                 if (thoughts) {
                     onThoughtChunk(thoughts);

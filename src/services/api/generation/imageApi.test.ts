@@ -159,7 +159,53 @@ describe('generateImagesApi', () => {
     });
   });
 
-  it('routes gpt-image models to the OpenAI images endpoint with normalized size', async () => {
+  it('routes gpt-image models to the OpenAI images endpoint with official landscape size', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'openai-image' }],
+        }),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        },
+      ),
+    );
+
+    await generateImagesApi(
+      'api-key',
+      'gpt-image-2',
+      'draw a robot',
+      '3:2',
+      '1K',
+      new AbortController().signal,
+      {
+        numberOfImages: 2,
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.openai.com/v1/images/generations');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toBeInstanceOf(Headers);
+
+    const headers = init.headers as Headers;
+    expect(headers.get('authorization')).toBe('Bearer api-key');
+
+    expect(JSON.parse(String(init.body))).toEqual({
+      model: 'gpt-image-2',
+      prompt: 'draw a robot',
+      n: 2,
+      output_format: 'png',
+      size: '1536x1024',
+    });
+    expect(getConfiguredApiClientMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes stale gpt-image 2K/16:9 settings to the closest official OpenAI image size', async () => {
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -181,28 +227,44 @@ describe('generateImagesApi', () => {
       '16:9',
       '2K',
       new AbortController().signal,
-      {
-        numberOfImages: 2,
-      },
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.openai.com/v1/images/generations');
-    expect(init.method).toBe('POST');
-    expect(init.headers).toBeInstanceOf(Headers);
-
-    const headers = init.headers as Headers;
-    expect(headers.get('authorization')).toBe('Bearer api-key');
-
-    expect(JSON.parse(String(init.body))).toEqual({
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
       model: 'gpt-image-2',
-      prompt: 'draw a robot',
-      n: 2,
-      output_format: 'png',
-      size: '2048x1152',
+      size: '1536x1024',
     });
-    expect(getConfiguredApiClientMock).not.toHaveBeenCalled();
+  });
+
+  it('sends auto size for gpt-image models when Auto is selected', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'openai-image' }],
+        }),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        },
+      ),
+    );
+
+    await generateImagesApi(
+      'api-key',
+      'gpt-image-2',
+      'draw a robot',
+      '2:3',
+      'Auto',
+      new AbortController().signal,
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: 'gpt-image-2',
+      size: 'auto',
+    });
   });
 
   it('uses the sibling server-managed proxy for gpt-image models when configured', async () => {

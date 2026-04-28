@@ -34,6 +34,7 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
   const isGemini3 = isGemini3Model(modelId);
   const capabilities = getModelCapabilities(modelId);
   const supportsThinkingLevel = capabilities.supportsThinkingLevel;
+  const isOpenAiReasoningEffortModel = capabilities.isOpenAiReasoningEffortModel;
   const isFlash3 = isGemini3 && modelId.toLowerCase().includes('flash');
   const isRobotics = modelId.toLowerCase().includes('gemini-robotics-er');
   const isGemini31FlashImage = modelId.toLowerCase().includes('gemini-3.1-flash-image');
@@ -45,6 +46,8 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
   const supportedThinkingLevels: ThinkingLevelOption[] =
     isImageThinkingLevelOnly
       ? ['MINIMAL', 'HIGH']
+      : isOpenAiReasoningEffortModel
+        ? ['LOW', 'MEDIUM', 'HIGH']
       : (supportsThinkingLevel
           ? ((isFlash3 || isRobotics) ? ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'] : ['LOW', 'MEDIUM', 'HIGH'])
           : []);
@@ -62,7 +65,7 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
   
   // Determine current mode
   const mode = thinkingBudget < 0 ? 'auto' : thinkingBudget === 0 ? 'off' : 'custom';
-  const showThinkingControls = !isTtsModel && (!!budgetConfig || isGemini3 || isGemma);
+  const showThinkingControls = !isTtsModel && (!!budgetConfig || isGemini3 || isGemma || isOpenAiReasoningEffortModel);
   const isGemmaReasoningEnabled = showThoughts;
   const gemmaThinkingLevel: ThinkingLevelOption = isGemmaReasoningEnabled ? 'HIGH' : 'MINIMAL';
 
@@ -95,6 +98,11 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
     if (!isImageThinkingLevelOnly || thinkingBudget === -1) return;
     setThinkingBudget(-1);
   }, [isImageThinkingLevelOnly, thinkingBudget, setThinkingBudget]);
+
+  useEffect(() => {
+    if (!isOpenAiReasoningEffortModel || thinkingBudget <= 0) return;
+    setThinkingBudget(-1);
+  }, [isOpenAiReasoningEffortModel, thinkingBudget, setThinkingBudget]);
 
   useEffect(() => {
     if (!isRobotics || thinkingBudget !== 0) return;
@@ -180,7 +188,7 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
 
   if (!showThinkingControls) return null;
 
-  const showContent = (supportsThinkingLevel && mode === 'auto') || mode === 'custom' || mode === 'off';
+  const showContent = (supportsThinkingLevel && mode === 'auto') || (!isOpenAiReasoningEffortModel && mode === 'custom') || mode === 'off';
 
   return (
     <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -205,6 +213,7 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
                   onModeChange={handleModeChange}
                   isGemini3={isGemini3}
                   canDisableThinking={canDisableThinking}
+                  showCustomMode={!isOpenAiReasoningEffortModel}
                   t={t}
               />
             )}
@@ -213,7 +222,7 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
             {(showContent || isImageThinkingLevelOnly) && (
                 <div className="mt-3 animate-in fade-in slide-in-from-top-1 duration-200">
                     
-                    {/* 1. Gemini 3.0 Preset Level Selector */}
+                    {/* 1. Preset reasoning level selector */}
                     {((supportsThinkingLevel && mode === 'auto') || isImageThinkingLevelOnly) && setThinkingLevel && (
                         <ThinkingLevelSelector
                             thinkingLevel={thinkingLevel}
@@ -223,7 +232,7 @@ export const ThinkingControl: React.FC<ThinkingControlProps> = ({
                     )}
 
                     {/* 2. Custom Budget Slider & Input */}
-                    {!isImageThinkingLevelOnly && mode === 'custom' && (
+                    {!isImageThinkingLevelOnly && !isOpenAiReasoningEffortModel && mode === 'custom' && (
                         <ThinkingBudgetSlider
                             minBudget={minBudget}
                             maxBudget={maxBudget}

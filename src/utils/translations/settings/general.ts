@@ -4,7 +4,7 @@ export const generalSettings = {
     settingsTabModel: { en: 'Model Settings', zh: '模型配置' },
     settingsTabSafety: { en: 'Safety', zh: '安全' },
     settingsTabAccount: { en: 'API', zh: 'API' },
-    settingsTabWorkspace: { en: 'AI Station', zh: 'AI 工作站' },
+    settingsTabWorkspace: { en: 'Account & Quota', zh: '账号与额度' },
     settingsTabData: { en: 'Storage', zh: '数据管理' },
     settingsTabAbout: { en: 'About', zh: '关于' },
     settingsTabShortcuts: { en: 'Shortcuts', zh: '快捷键' },

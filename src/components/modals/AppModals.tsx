@@ -59,6 +59,9 @@ interface AppModalsProps {
   currentChatSettings: ChatSettings;
 
   setAvailableModels: (models: ModelOption[]) => void;
+  onRefreshModels?: () => void | Promise<void>;
+  isRefreshingModels?: boolean;
+  modelsRefreshError?: string | null;
 }
 
 export const AppModals: React.FC<AppModalsProps> = (props) => {
@@ -86,7 +89,10 @@ export const AppModals: React.FC<AppModalsProps> = (props) => {
         isLogViewerOpen = false,
         setIsLogViewerOpen = () => {},
         currentChatSettings,
-        setAvailableModels
+        setAvailableModels,
+        onRefreshModels,
+        isRefreshingModels,
+        modelsRefreshError
     } = props;
 
     const openLogViewer = (state?: Pick<LogViewerProps, 'initialTab' | 'initialUsageTab'>) => {
@@ -136,6 +142,9 @@ export const AppModals: React.FC<AppModalsProps> = (props) => {
                   onExportScenarios={handleExportAllScenarios}
                   t={t}
                   setAvailableModels={setAvailableModels}
+                  onRefreshModels={onRefreshModels}
+                  isRefreshingModels={isRefreshingModels}
+                  modelsRefreshError={modelsRefreshError}
                 />
             </Suspense>
           )}

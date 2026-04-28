@@ -2,14 +2,22 @@ import type {
   WorkspaceAdminStateResponse,
   WorkspaceAdminDiagnosticsResponse,
   WorkspaceAdminApiSettingsResponse,
+  WorkspaceCloudAdminAttachmentSummary,
+  WorkspaceCloudAdminSessionSummary,
+  WorkspaceCloudCleanupResult,
+  WorkspaceCloudRetentionSettings,
   WorkspaceDashboardResponse,
+  WorkspaceModelDiscoveryResponse,
+  WorkspaceObjectStorageSettingsResponse,
+  WorkspacePageResponse,
   WorkspaceSessionResponse,
+  WorkspaceSystemScenario,
   WorkspaceUsagePageResponse,
 } from '../types';
 
 const WORKSPACE_API_PREFIX = '/api/workspace';
 
-type JsonBody = Record<string, unknown>;
+type JsonBody = object;
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${WORKSPACE_API_PREFIX}${path}`, {
@@ -129,6 +137,10 @@ export const workspaceApi = {
     return requestJson<WorkspaceDashboardResponse>('/dashboard');
   },
 
+  discoverModels(): Promise<WorkspaceModelDiscoveryResponse> {
+    return requestJson<WorkspaceModelDiscoveryResponse>('/models');
+  },
+
   redeemCode(code: string): Promise<WorkspaceDashboardResponse> {
     return postJson<WorkspaceDashboardResponse>('/redeem', { code });
   },
@@ -157,6 +169,118 @@ export const workspaceApi = {
 
   importAdminApiSettingsFromEnvironment(): Promise<WorkspaceAdminApiSettingsResponse> {
     return postJson<WorkspaceAdminApiSettingsResponse>('/admin/api-settings/import-environment', {});
+  },
+
+  getObjectStorageSettings(): Promise<WorkspaceObjectStorageSettingsResponse> {
+    return requestJson<WorkspaceObjectStorageSettingsResponse>('/admin/object-storage');
+  },
+
+  updateObjectStorageSettings(body: {
+    enabled: boolean;
+    endpoint: string;
+    region: string;
+    bucket: string;
+    accessKeyId: string;
+    secretAccessKey?: string;
+    clearSecretAccessKey?: boolean;
+    forcePathStyle: boolean;
+    publicBaseUrl?: string | null;
+    prefix: string;
+  }): Promise<WorkspaceObjectStorageSettingsResponse> {
+    return patchJson<WorkspaceObjectStorageSettingsResponse>('/admin/object-storage', body);
+  },
+
+  getVisibleSystemScenarios(): Promise<{ scenarios: WorkspaceSystemScenario[] }> {
+    return requestJson<{ scenarios: WorkspaceSystemScenario[] }>('/scenarios');
+  },
+
+  getAdminCloudSessions(query: {
+    page?: number;
+    pageSize?: number;
+    userId?: string;
+    search?: string;
+  } = {}): Promise<WorkspacePageResponse<WorkspaceCloudAdminSessionSummary>> {
+    return requestJson<WorkspacePageResponse<WorkspaceCloudAdminSessionSummary>>(
+      `/admin/cloud-chat/sessions${buildUsageQueryString(query)}`,
+    );
+  },
+
+  getAdminCloudSession(
+    userId: string,
+    sessionId: string,
+  ): Promise<{ session: WorkspaceCloudAdminSessionSummary }> {
+    return requestJson<{ session: WorkspaceCloudAdminSessionSummary }>(
+      `/admin/cloud-chat/sessions/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`,
+    );
+  },
+
+  deleteAdminCloudSessions(
+    sessions: Array<{ userId: string; id: string }>,
+  ): Promise<{ deletedCount: number }> {
+    return postJson<{ deletedCount: number }>('/admin/cloud-chat/sessions/delete', { sessions });
+  },
+
+  getAdminCloudAttachments(query: {
+    page?: number;
+    pageSize?: number;
+    userId?: string;
+    sessionId?: string;
+    search?: string;
+  } = {}): Promise<WorkspacePageResponse<WorkspaceCloudAdminAttachmentSummary>> {
+    return requestJson<WorkspacePageResponse<WorkspaceCloudAdminAttachmentSummary>>(
+      `/admin/cloud-chat/attachments${buildUsageQueryString(query)}`,
+    );
+  },
+
+  deleteAdminCloudAttachments(
+    attachmentIds: string[],
+  ): Promise<{ deletedCount: number; deletedBytes: number }> {
+    return postJson<{ deletedCount: number; deletedBytes: number }>(
+      '/admin/cloud-chat/attachments/delete',
+      { attachmentIds },
+    );
+  },
+
+  getCloudRetentionSettings(): Promise<WorkspaceCloudRetentionSettings> {
+    return requestJson<WorkspaceCloudRetentionSettings>('/admin/cloud-chat/retention');
+  },
+
+  updateCloudRetentionSettings(
+    body: Partial<WorkspaceCloudRetentionSettings>,
+  ): Promise<WorkspaceCloudRetentionSettings> {
+    return patchJson<WorkspaceCloudRetentionSettings>('/admin/cloud-chat/retention', body);
+  },
+
+  runCloudAttachmentCleanup(body: {
+    dryRun?: boolean;
+    maxAttachmentAgeDays?: number;
+    maxTotalAttachmentBytes?: number;
+  }): Promise<WorkspaceCloudCleanupResult> {
+    return postJson<WorkspaceCloudCleanupResult>('/admin/cloud-chat/cleanup', body);
+  },
+
+  getAdminSystemScenarios(): Promise<{ scenarios: WorkspaceSystemScenario[] }> {
+    return requestJson<{ scenarios: WorkspaceSystemScenario[] }>('/admin/system-scenarios');
+  },
+
+  createSystemScenario(body: Partial<WorkspaceSystemScenario>): Promise<{ scenario: WorkspaceSystemScenario }> {
+    return postJson<{ scenario: WorkspaceSystemScenario }>('/admin/system-scenarios', body);
+  },
+
+  updateSystemScenario(
+    id: string,
+    body: Partial<WorkspaceSystemScenario>,
+  ): Promise<{ scenario: WorkspaceSystemScenario }> {
+    return putJson<{ scenario: WorkspaceSystemScenario }>(
+      `/admin/system-scenarios/${encodeURIComponent(id)}`,
+      body,
+    );
+  },
+
+  deleteSystemScenario(id: string): Promise<{ success: boolean }> {
+    return requestJson<{ success: boolean }>(`/admin/system-scenarios/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   },
 
   getAdminUsage(query: {

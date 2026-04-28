@@ -3,6 +3,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { withSqliteFileLock } from './sqliteFileLock.js';
 
 const scrypt = promisify(scryptCallback);
 const nodeRequire = createRequire(import.meta.url);
@@ -401,6 +402,7 @@ const MAX_RECHARGE_ORDERS = 1000;
 const DEFAULT_USAGE_PAGE_SIZE = 50;
 const MAX_USAGE_PAGE_SIZE = 200;
 const API_PROVIDERS: WorkspaceApiProvider[] = ['gemini', 'openai', 'anthropic'];
+const SUPPORTED_OPENAI_IMAGE_MODEL_IDS = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'] as const;
 
 const DEFAULT_MODEL_POLICIES: WorkspaceModelPolicy[] = [
   createPolicy('GPT Chat Family', 'gpt-*', 8, 'OpenAI-compatible GPT 文本对话'),
@@ -416,8 +418,9 @@ const DEFAULT_MODEL_POLICIES: WorkspaceModelPolicy[] = [
   createPolicy('Imagen 4 Fast', 'imagen-4.0-fast-generate-001', 35, '快速出图'),
   createPolicy('Imagen 4 Standard', 'imagen-4.0-generate-001', 60, '标准出图'),
   createPolicy('Imagen 4 Ultra', 'imagen-4.0-ultra-generate-001', 120, '高质量出图'),
-  createPolicy('GPT Image Family', 'gpt-image-*', 80, 'OpenAI-compatible GPT 图像生成'),
-  createPolicy('DALL-E Image Family', 'dall-e-*', 70, 'OpenAI-compatible DALL-E 图像生成'),
+  ...SUPPORTED_OPENAI_IMAGE_MODEL_IDS.map((modelId) =>
+    createPolicy(modelId, modelId, 80, 'OpenAI-compatible GPT 图像生成'),
+  ),
   createPolicy('Default Model Request', '*', 1, '未单独配置策略的模型请求'),
 ];
 
@@ -521,6 +524,57 @@ function normalizePositiveInteger(value: unknown, fallback = 0): number {
   }
 
   return parsed;
+}
+
+function normalizeModelPolicy(policy: Partial<WorkspaceModelPolicy>): WorkspaceModelPolicy {
+  const now = new Date().toISOString();
+  return {
+    id: policy.id || randomUUID(),
+    label: policy.label || '未命名策略',
+    modelPattern: policy.modelPattern || '*',
+    costCredits: normalizePositiveInteger(policy.costCredits, 0),
+    description: normalizeOptionalText(policy.description),
+    createdAt: policy.createdAt || now,
+    updatedAt: policy.updatedAt || now,
+  };
+}
+
+function createSupportedOpenAiImagePoliciesFromLegacy(policy: WorkspaceModelPolicy): WorkspaceModelPolicy[] {
+  const now = new Date().toISOString();
+  return SUPPORTED_OPENAI_IMAGE_MODEL_IDS.map((modelId) => ({
+    ...policy,
+    id: `${policy.id}-${modelId}`,
+    label: modelId,
+    modelPattern: modelId,
+    description: policy.description || 'OpenAI-compatible GPT 图像生成',
+    updatedAt: now,
+  }));
+}
+
+function normalizeModelPolicies(value: unknown, defaultPolicies: WorkspaceModelPolicy[]): WorkspaceModelPolicy[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    return defaultPolicies;
+  }
+
+  const policies: WorkspaceModelPolicy[] = [];
+  for (const rawPolicy of value) {
+    const policy = normalizeModelPolicy(rawPolicy as Partial<WorkspaceModelPolicy>);
+    const label = policy.label.trim().toLowerCase();
+    const modelPattern = policy.modelPattern.trim().toLowerCase();
+
+    if (label === 'dall-e image family' && modelPattern === 'dall-e-*') {
+      continue;
+    }
+
+    if (label === 'gpt image family' && modelPattern === 'gpt-image-*') {
+      policies.push(...createSupportedOpenAiImagePoliciesFromLegacy(policy));
+      continue;
+    }
+
+    policies.push(policy);
+  }
+
+  return policies.length > 0 ? policies : defaultPolicies;
 }
 
 function normalizeSignedInteger(value: unknown, fallback = 0): number {
@@ -1363,17 +1417,7 @@ export function normalizeWorkspaceState(input: Partial<WorkspaceState>): Workspa
       lastLoginAt: user.lastLoginAt ?? null,
     })) : [],
     sessions: Array.isArray(input.sessions) ? input.sessions : [],
-    modelPolicies: Array.isArray(input.modelPolicies) && input.modelPolicies.length > 0
-      ? input.modelPolicies.map((policy) => ({
-        id: policy.id || randomUUID(),
-        label: policy.label || '未命名策略',
-        modelPattern: policy.modelPattern || '*',
-        costCredits: normalizePositiveInteger(policy.costCredits, 0),
-        description: normalizeOptionalText(policy.description),
-        createdAt: policy.createdAt || new Date().toISOString(),
-        updatedAt: policy.updatedAt || new Date().toISOString(),
-      }))
-      : defaultState.modelPolicies,
+    modelPolicies: normalizeModelPolicies(input.modelPolicies, defaultState.modelPolicies),
     redeemCodes: Array.isArray(input.redeemCodes)
       ? input.redeemCodes.map((code) => ({
         ...code,
@@ -2813,12 +2857,12 @@ export class WorkspaceService {
     sessionToken: string | null,
   ): WorkspaceUserRecord {
     if (!sessionToken) {
-      throw new WorkspaceError(401, '请先登录阿荣AI工作站。');
+      throw new WorkspaceError(401, '请先登录后再聊天。打开左侧菜单底部「设置」→「账号与额度」登录；没有账号可用邀请码注册。');
     }
 
     const user = this.getUserBySessionToken(state, sessionToken);
     if (!user) {
-      throw new WorkspaceError(401, '登录状态已失效，请重新登录。');
+      throw new WorkspaceError(401, '登录状态已过期。请到「设置」→「账号与额度」重新登录。');
     }
 
     if (user.disabled) {
@@ -2845,35 +2889,37 @@ export class WorkspaceService {
   }
 
   private async mutate<T>(mutation: (state: WorkspaceState) => Promise<T> | T): Promise<T> {
-    if (this.storage.mutateState) {
-      return this.storage.mutateState(
-        createDefaultWorkspaceState,
-        normalizeWorkspaceState,
-        async (state) => {
-          state.sessions = this.pruneSessions(state.sessions);
-          return mutation(state);
-        },
-      );
-    }
+    return withSqliteFileLock(this.databaseFilePath, async () => {
+      if (this.storage.mutateState) {
+        return this.storage.mutateState(
+          createDefaultWorkspaceState,
+          normalizeWorkspaceState,
+          async (state) => {
+            state.sessions = this.pruneSessions(state.sessions);
+            return mutation(state);
+          },
+        );
+      }
 
-    let resolveQueue: () => void = () => {};
-    const nextQueue = new Promise<void>((resolve) => {
-      resolveQueue = resolve;
+      let resolveQueue: () => void = () => {};
+      const nextQueue = new Promise<void>((resolve) => {
+        resolveQueue = resolve;
+      });
+      const previousQueue = this.mutationQueue;
+      this.mutationQueue = previousQueue.then(() => nextQueue);
+
+      await previousQueue;
+
+      try {
+        const state = await this.readState();
+        state.sessions = this.pruneSessions(state.sessions);
+        const result = await mutation(state);
+        await this.writeState(state);
+        return result;
+      } finally {
+        resolveQueue();
+      }
     });
-    const previousQueue = this.mutationQueue;
-    this.mutationQueue = previousQueue.then(() => nextQueue);
-
-    await previousQueue;
-
-    try {
-      const state = await this.readState();
-      state.sessions = this.pruneSessions(state.sessions);
-      const result = await mutation(state);
-      await this.writeState(state);
-      return result;
-    } finally {
-      resolveQueue();
-    }
   }
 
   private async readState(): Promise<WorkspaceState> {
@@ -2907,17 +2953,7 @@ export class WorkspaceService {
         lastLoginAt: user.lastLoginAt ?? null,
       })) : [],
       sessions: Array.isArray(input.sessions) ? input.sessions : [],
-      modelPolicies: Array.isArray(input.modelPolicies) && input.modelPolicies.length > 0
-        ? input.modelPolicies.map((policy) => ({
-          id: policy.id || randomUUID(),
-          label: policy.label || '未命名策略',
-          modelPattern: policy.modelPattern || '*',
-          costCredits: normalizePositiveInteger(policy.costCredits, 0),
-          description: normalizeOptionalText(policy.description),
-          createdAt: policy.createdAt || new Date().toISOString(),
-          updatedAt: policy.updatedAt || new Date().toISOString(),
-        }))
-        : defaultState.modelPolicies,
+      modelPolicies: normalizeModelPolicies(input.modelPolicies, defaultState.modelPolicies),
       redeemCodes: Array.isArray(input.redeemCodes)
         ? input.redeemCodes.map((code) => ({
           ...code,
